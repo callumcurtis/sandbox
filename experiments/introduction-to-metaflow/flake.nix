@@ -17,8 +17,11 @@
           packages = with pkgs; [
             (writeShellScriptBin "python" ''
               export LD_LIBRARY_PATH=$NIX_LD_LIBRARY_PATH
-              exec ${python313}/bin/python "$@"
+              exec ${python312}/bin/python "$@"
             '')
+            cargo
+            rustc
+            libffi
           ];
 
           shellHook = ''
