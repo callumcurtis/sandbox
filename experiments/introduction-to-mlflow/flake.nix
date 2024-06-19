@@ -14,11 +14,12 @@
       in
       {
         devShells.default = pkgs.mkShell {
+          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (with pkgs; [
+            stdenv.cc.cc
+          ]);
+
           packages = with pkgs; [
-            (writeShellScriptBin "python" ''
-              export LD_LIBRARY_PATH=$NIX_LD_LIBRARY_PATH
-              exec ${python312}/bin/python "$@"
-            '')
+            python312
           ];
 
           shellHook = ''
