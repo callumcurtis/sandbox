@@ -1,16 +1,9 @@
-import os
-
 import mlflow
 from sklearn.model_selection import train_test_split
 from sklearn.datasets import load_diabetes
 from sklearn.ensemble import RandomForestRegressor
 
 
-# Connect to tracking server
-MLFLOW_SERVER_URL = os.environ.get("MLFLOW_SERVER_URL")
-assert MLFLOW_SERVER_URL is not None, "MLFLOW_SERVER_URL environment variable must be provided"
-
-mlflow.set_tracking_uri(MLFLOW_SERVER_URL)
 mlflow.set_experiment("/autologging-quickstart")
 
 mlflow.autolog()

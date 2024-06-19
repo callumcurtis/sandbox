@@ -4,5 +4,5 @@
 
 - `pip install -r requirements.txt`
 - `mlflow ui`
-- `export MLFLOW_SERVER_URL=<the "listening at" url from your mlflow server logs>`
+- `export MLFLOW_TRACKING_URI=<the "listening at" url from your mlflow server logs>`
 

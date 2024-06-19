@@ -1,5 +1,3 @@
-import os
-
 import mlflow
 from mlflow.models.signature import infer_signature
 import pandas as pd
@@ -9,11 +7,6 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 
 
-# Connect to tracking server
-MLFLOW_SERVER_URL = os.environ.get("MLFLOW_SERVER_URL")
-assert MLFLOW_SERVER_URL is not None, "MLFLOW_SERVER_URL environment variable must be provided"
-
-mlflow.set_tracking_uri(MLFLOW_SERVER_URL)
 mlflow.set_experiment("/tracking-quickstart")
 
 # Load the Iris dataset
