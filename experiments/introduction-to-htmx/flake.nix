@@ -10,12 +10,25 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+        venv = "./.venv";
       in
       {
         devShells.default = pkgs.mkShell {
+          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (with pkgs; [
+            stdenv.cc.cc
+          ]);
+
           packages = with pkgs; [
-            # TODO
+            python312
           ];
+
+          shellHook = ''
+            if test ! -d ${venv}; then
+              python -m venv ${venv}
+            fi
+
+            source ${venv}/bin/activate
+          '';
         };
       });
 }
