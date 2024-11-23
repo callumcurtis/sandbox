@@ -4,13 +4,29 @@ Based on progress through the [Rust Book](https://doc.rust-lang.org/book/).
 
 Rust is strongly typed with type inference.
 
+## Constants
+
+- `const` keyword instead of `let`
+- Always immutable (unlike variables)
+- Must be declared with a type annotation (unlike variables)
+- Expression must be determinable at compile-time
+- Can be declared in any scope
+
+## Mutability
+
+- By default, all variables are immutable
+- `mut` keyword makes mutable
+
 ## Primitives
 
 - Unless otherwise specified, Rust defaults to an `i32`
 
-## Scope
+## Shadowing
 
-- Shadowing is supported - can redeclare local variables, e.g., with different mutability and/or types
+- Shadowing is supported - can redeclare variables in the same scope
+- Can be used to change the type of a variable
+- Can be used to change the mutability of a variable
+- Can be used to "modify" an immutable variable by redefining it
 
 ## String Formatting
 
@@ -38,8 +54,8 @@ Rust is strongly typed with type inference.
 
 - filenames: snake_case
 - indents: four spaces
-- variables
-    - local: snake_case
+- local variables: snake_case
+- constants: UPPER_SNAKE_CASE
 
 ## Cargo
 
