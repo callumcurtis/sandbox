@@ -2,7 +2,44 @@
 
 Based on progress through the [Rust Book](https://doc.rust-lang.org/book/).
 
-Rust is strongly typed with type inference.
+## Data Types
+
+- Rust is statically typed with type inference
+- Type must be specified when ambiguous (e.g., `String::parse`)
+- Scalar: single value; int, float, bool, char
+
+## Integers
+
+- Two dimensions, size and sign: `<i/u><size>` (e.g., `i16`, `u64`)
+- Signed ints are stored using 2's complement: `-2^(n-1)..=2^(n-1)-1`
+- Int literals can have type suffix (e.g., `57u8`)
+- Int literals can be provided in decimal, hex, octal, binary, and byte formats
+- Truncation towards 0
+
+## Integer Overflow
+
+- If compiled in debug mode, panics at runtime if integer overflow
+- When compiled in release mode, uses 2's complement wrapping
+- If integer overflow is intended, use `wrapping_*` methods
+- Check if overflow occurs with `checked_*` methods
+- Return new value and overflow flag with `overflowing_*` methods
+- Saturate min/max values with `saturating_*` methods
+
+## Floats
+
+- `f32` or `f64`
+- `f64` by default, since, on most platforms, same performance
+- IEEE-754 standard
+
+## Booleans
+
+- One byte
+
+## Chars
+
+- Char literals surrounded in single quotes (string literals in double quotes)
+- Four bytes
+- Unicode
 
 ## Constants
 
@@ -52,10 +89,10 @@ Rust is strongly typed with type inference.
 
 ## Style
 
-- filenames: snake_case
-- indents: four spaces
-- local variables: snake_case
-- constants: UPPER_SNAKE_CASE
+- Filenames: snake_case
+- Indents: four spaces
+- Local variables: snake_case
+- Constants: UPPER_SNAKE_CASE
 
 ## Cargo
 
