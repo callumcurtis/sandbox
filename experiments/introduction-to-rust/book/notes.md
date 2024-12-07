@@ -7,6 +7,7 @@ Based on progress through the [Rust Book](https://doc.rust-lang.org/book/).
 - Rust is statically typed with type inference
 - Type must be specified when ambiguous (e.g., `String::parse`)
 - Scalar: single value; int, float, bool, char
+- Compound: tuple, array
 
 ## Integers
 
@@ -40,6 +41,15 @@ Based on progress through the [Rust Book](https://doc.rust-lang.org/book/).
 - Char literals surrounded in single quotes (string literals in double quotes)
 - Four bytes
 - Unicode
+
+## Tuples
+
+- Fixed length
+- Heterogeneous types
+- Definition: `let tup = (500, 6.4, 1);`
+- Destructuring assignment: `let (x, y, z) = tup;`
+- Element access: `<tuple>.<index>`, e.g., `tup.0`
+- Unit: tuple without any values; `()`; represents an empty value or empty return type
 
 ## Constants
 
