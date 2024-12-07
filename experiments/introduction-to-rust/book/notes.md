@@ -84,6 +84,24 @@ Based on progress through the [Rust Book](https://doc.rust-lang.org/book/).
 - Do not end with semicolon; if a semicolon is added, becomes a statement
 - Examples: function calling, arithmetic, scope block
 
+## Conditionals
+
+- `if <condition> { ... } else if <condition> { ... } else { ... }`
+- Prefer `match` if many `else if` cases
+- Is an expression; can use with statements: `let number = if condition { 5 } else { 6 };`
+
+## Looping
+
+- Three constructs: `loop`, `while`, `for`
+- `break` and `continue`
+- `loop`: infinite until `break`
+- Can pass expression to `break` to return value from `loop`
+- Loop label: allows `break` and `continue` to apply to any loop in the hierarchy (instead of innermost)
+  - Example: `'counting_up: loop { ... }`
+  - Begins with single quote
+- `while <condition> { ... }`
+- `for <identifier> in <iterable> { ... }`
+
 ## Functions
 
 - Definition: `fn <name>([<parameter_name>: <parameter_type>[, <parameter_name>: <parameter_type>[...]]]) [-> <return_type>] { ... }`
@@ -124,6 +142,7 @@ Based on progress through the [Rust Book](https://doc.rust-lang.org/book/).
 
 - `1..=10` is inclusive
 - `1..10` is exclusive
+- Reversing: `(<range_expression>).rev()`
 
 ## Enums
 
