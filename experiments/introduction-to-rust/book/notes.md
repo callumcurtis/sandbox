@@ -48,8 +48,19 @@ Based on progress through the [Rust Book](https://doc.rust-lang.org/book/).
 - Heterogeneous types
 - Definition: `let tup = (500, 6.4, 1);`
 - Destructuring assignment: `let (x, y, z) = tup;`
-- Element access: `<tuple>.<index>`, e.g., `tup.0`
+- Element access: `<tuple>.<index>`; e.g., `tup.0`
 - Unit: tuple without any values; `()`; represents an empty value or empty return type
+
+## Arrays
+
+- Fixed length
+- Homogeneous types
+- Allocated on the stack
+- Definition: `let a = [1, 2, 3, 4, 5];`
+- Typing: `[<type>; <size>]`; e.g., `let a: [i32; 5] = [1, 2, 3, 4, 5];`
+- Repeated value definition: `[<value>; <size>]`; e.g., `let a = [3; 5];` <-> `let a = [3, 3, 3, 3, 3];`
+- Indexing: `<array>[<index>]`
+- OOB errors at runtime (panic)
 
 ## Constants
 
