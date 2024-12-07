@@ -49,7 +49,7 @@ Based on progress through the [Rust Book](https://doc.rust-lang.org/book/).
 - Definition: `let tup = (500, 6.4, 1);`
 - Destructuring assignment: `let (x, y, z) = tup;`
 - Element access: `<tuple>.<index>`; e.g., `tup.0`
-- Unit: tuple without any values; `()`; represents an empty value or empty return type
+- Unit type: tuple without any values; `()`; represents an empty value or empty return type
 
 ## Arrays
 
@@ -61,6 +61,35 @@ Based on progress through the [Rust Book](https://doc.rust-lang.org/book/).
 - Repeated value definition: `[<value>; <size>]`; e.g., `let a = [3; 5];` <-> `let a = [3, 3, 3, 3, 3];`
 - Indexing: `<array>[<index>]`
 - OOB errors at runtime (panic)
+
+## Scope Block
+
+- Example:
+
+  ```rust
+  let y = {
+      let x = 3;
+      x + 1 // missing semicolon is required (expression, not statement)
+  };
+  ```
+
+## Statements
+
+- Instructions that perform some action and **do not** return a value
+- Examples: assignment (`x = y = 6` is invalid syntax), function definition
+
+## Expressions
+
+- Evaluate to a resultant value
+- Do not end with semicolon; if a semicolon is added, becomes a statement
+- Examples: function calling, arithmetic, scope block
+
+## Functions
+
+- Definition: `fn <name>([<parameter_name>: <parameter_type>[, <parameter_name>: <parameter_type>[...]]]) [-> <return_type>] { ... }`
+- Insensitive to function declaration order; can reference earler/later functions
+- Implicitly return the final expression in the body; can `return` early/explicitly
+- Return the unit type by default
 
 ## Constants
 
@@ -114,6 +143,7 @@ Based on progress through the [Rust Book](https://doc.rust-lang.org/book/).
 - Indents: four spaces
 - Local variables: snake_case
 - Constants: UPPER_SNAKE_CASE
+- Functions: snake_case
 
 ## Cargo
 
