@@ -6,8 +6,9 @@ Based on progress through the [Rust Book](https://doc.rust-lang.org/book/).
 
 - Rust is statically typed with type inference
 - Type must be specified when ambiguous (e.g., `String::parse`)
-- Scalar: single value; int, float, bool, char
-- Compound: tuple, array
+- Primitives: placed on the stack
+  - Scalar: single value; int, float, bool, char
+  - Compound: tuple, array
 
 ## Integers
 
@@ -55,7 +56,6 @@ Based on progress through the [Rust Book](https://doc.rust-lang.org/book/).
 
 - Fixed length
 - Homogeneous types
-- Allocated on the stack
 - Definition: `let a = [1, 2, 3, 4, 5];`
 - Typing: `[<type>; <size>]`; e.g., `let a: [i32; 5] = [1, 2, 3, 4, 5];`
 - Repeated value definition: `[<value>; <size>]`; e.g., `let a = [3; 5];` <-> `let a = [3, 3, 3, 3, 3];`
@@ -187,4 +187,14 @@ cargo doc --open
 ```
 
 - Allows installing crates - external source code files
+
+## Ownership
+
+- Rules that govern how memory in the heap is managed
+- Rules are checked at compile time; non-compliance leads to compilation error
+- No runtime overhead
+- Rules:
+  - Each value has an owner
+  - There can only be one owner at a time
+  - When the owner goes out of scope, the value will be dropped
 
