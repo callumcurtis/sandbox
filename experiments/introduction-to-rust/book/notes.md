@@ -153,7 +153,13 @@ Based on progress through the [Rust Book](https://doc.rust-lang.org/book/).
 ## Enums
 
 - Enum states are called variants
-- `Ok`/`Err` as `Return` states for error handling
+- `Ok`/`Err` as `Return` variants for error handling
+- Definition: e.g., `enum IpAddr { V4(u8, u8, u8, u8), V6 {x: i32, y: i32} }`
+  - Unnamed fields, named fields, or no fields
+- Instantiation: each variant has a unique constructor; e.g., `let four = IpAddr::V4(127, 0, 0, 1);`
+- Enums can contain any data type, including **structs** and other enums
+- Can `impl` associated functions for an enum
+- `None`/`Some` as `Option` variants for null handling; included in prelude
 
 ## Match
 
