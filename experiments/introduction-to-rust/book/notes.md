@@ -235,6 +235,35 @@ cargo doc --open
   - Useful when implementing a trait on a struct without fields
 - Fields must be owned by the instance or be references with lifetimes
 
+## Methods
+
+- `impl`emented on structs, enums, and traits
+
+  ```rust
+  #[derive(Debug)]
+  struct Rectangle {
+      width: u32,
+      height: u32,
+  }
+
+  impl Rectangle {
+      fn area(&self) -> u32 {
+          self.width * self.height
+      }
+  }
+  ```
+
+- Invocation: `rectangle.area()`
+- First parameter `&self`; shorthand for `self: &Self`; `Self` aliases the type applied to `impl`
+- Method can take ownership of `self`, borrow it mutably, or borrow it immutably
+- Method names can duplicate field names; compiler differentiates based on parentheses in usage
+- Compiler uses signature of `self` for "automatic referencing and dereferencing" (i.e., no `->`)
+- Associated functions: defined together in `impl` blocks for a given type
+- Associated functions that are not methods do not accept `self` as first parameter
+  - Often used for constructors; `new` by **convention**
+  - Invocation: `Rectangle::new()`
+- Multiple `impl` blocks may exist for the same type
+
 ## Attributes
 
 - `#[derive(Debug)]` enables `{:?}` and `dbg!` formatting for structs
