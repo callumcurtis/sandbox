@@ -39,7 +39,7 @@ Based on progress through the [Rust Book](https://doc.rust-lang.org/book/).
 
 ## Chars
 
-- Char literals surrounded in single quotes (string literals in double quotes)
+- Char literals surrounded in single quotes
 - Four bytes
 - Unicode
 
@@ -61,6 +61,11 @@ Based on progress through the [Rust Book](https://doc.rust-lang.org/book/).
 - Repeated value definition: `[<value>; <size>]`; e.g., `let a = [3; 5];` <-> `let a = [3, 3, 3, 3, 3];`
 - Indexing: `<array>[<index>]`
 - OOB errors at runtime (panic)
+
+## String Literals
+
+- Surrounded in double quotes
+- Slice in the binary
 
 ## Scope Block
 
@@ -143,6 +148,7 @@ Based on progress through the [Rust Book](https://doc.rust-lang.org/book/).
 - `1..=10` is inclusive
 - `1..10` is exclusive
 - Reversing: `(<range_expression>).rev()`
+- Can omit start/end to use full range: `..5`, `3..`, `..`
 
 ## Enums
 
@@ -213,4 +219,6 @@ cargo doc --open
   - Alternative to taking and returning ownership in functions
   - Either one mutable reference (prevents data races) or any number of immutable references
   - Reference's scope ends at last use; references' scopes may not overlap, even in the same block
+- Slice: **reference** to a contiguous sequence of elements in a collection (e.g., `&s[0..5]`)
+  - Internally is a reference to the first element and a length
 
