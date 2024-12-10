@@ -222,3 +222,16 @@ cargo doc --open
 - Slice: **reference** to a contiguous sequence of elements in a collection (e.g., `&s[0..5]`)
   - Internally is a reference to the first element and a length
 
+## Structs
+
+- Definition: `struct <name> { [<field_name>: <field_type>[, <field_name>: <field_type>[...]]] }`
+- Instantiation: `let user1 = User { active: true, ... };`
+- Field shorthand: `let user1 = User { email, ... };` (where `email` is an in-scope variable)
+- Struct update: `let user2 = User { active: false, ..user1 };`
+  - Moves/copies remaining fields from source instance; beware invalidation of moved fields
+- Access: `user1.email`
+- Individual fields can be mutated iff the entire instance is mutable
+- Tuple struct: distinct type name; otherwise equivalent to tuple; e.g., `struct AlwaysEqual;`
+  - Useful when implementing a trait on a struct without fields
+- Fields must be owned by the instance or be references with lifetimes
+
