@@ -235,3 +235,11 @@ cargo doc --open
   - Useful when implementing a trait on a struct without fields
 - Fields must be owned by the instance or be references with lifetimes
 
+## Attributes
+
+- `#[derive(Debug)]` enables `{:?}` and `dbg!` formatting for structs
+
+## Debugging
+
+- `dbg!` macro wraps an expression, prints the result to stderr, and returns ownership of the result
+
