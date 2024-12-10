@@ -194,7 +194,20 @@ cargo doc --open
 - Rules are checked at compile time; non-compliance leads to compilation error
 - No runtime overhead
 - Rules:
-  - Each value has an owner
-  - There can only be one owner at a time
-  - When the owner goes out of scope, the value will be dropped
+  - R1: each value has an owner
+  - R2: there can only be one owner at a time
+  - R3: when the owner goes out of scope, memory for the value is deallocated (RAII)
+- Corollaries:
+  - C1: if a value is orphaned (e.g., after reassignment), it is immediately deallocated
+- `drop` is responsible for deallocating memory; called when value leaves scope
+- Move: copies data on the stack and claims data on the heap; implicit
+  - Other references become invalid (R2)
+- Clone: if implemented, clones rather than moves data on the heap; explicit `clone` required
+- Copy: if implemented; all data must be on the stack; mutually exclusive with `drop`; implicit
+  - All scalar primitives are copyable
+  - All compound types (including primitives) with copyable elements are also copyable
+- Values are deallocated in reverse order of allocation
+- Functions: arguments and return values are copied or moved
+  - If moved, the argument moves into the function's scope and is no longer valid from the caller
+- References: instead of taking ownership and then returning ownership
 
