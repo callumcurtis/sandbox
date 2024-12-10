@@ -209,5 +209,8 @@ cargo doc --open
 - Values are deallocated in reverse order of allocation
 - Functions: arguments and return values are copied or moved
   - If moved, the argument moves into the function's scope and is no longer valid from the caller
-- References: instead of taking ownership and then returning ownership
+- References (borrowing): does not transfer ownership; immutable by default; `&`, `&mut`, and `*`
+  - Alternative to taking and returning ownership in functions
+  - Either one mutable reference (prevents data races) or any number of immutable references
+  - Reference's scope ends at last use; references' scopes may not overlap, even in the same block
 
