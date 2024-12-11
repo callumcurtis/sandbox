@@ -328,8 +328,9 @@ cargo doc --open
   - Module resolution begins at the crate root
   - Resolution order: when a module is declared its implementation is resolved from one of these places
     1. Inline, within curly braces; e.g., `mod <module> { ... }`
-    2. In the file `<module>.rs`, relative to the directory of the file where the module is declared
-    3. In the file `<module>/mod.rs`, relative to the directory of the file where the module is declared
+    2. In the file `<module>.rs`, relative to the file where the module is declared
+    3. In the file `<module>/mod.rs`, relative to the file where the module is declared (old style)
+  - Modules are declared once and referenced by paths; no notion of "include"
 - Crate: tree of modules that produce a library (library crate) or executable (binary crate)
   - Smallest/atomic unit considered by the Rust compiler
   - Root: source file the compiler starts with for the crate; root module named `crate`
