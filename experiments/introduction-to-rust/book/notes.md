@@ -305,3 +305,21 @@ cargo doc --open
 
 - `dbg!` macro wraps an expression, prints the result to stderr, and returns ownership of the result
 
+## Project Structure
+
+- Path: way of naming an item (e.g., struct, function, module)
+- Module: unit of scope; `use`
+- Crate: tree of modules that produce a library (library crate) or executable (binary crate)
+  - Smallest/atomic unit considered by the Rust compiler
+  - Root: source file the compiler starts with for the crate; root module
+- Package: contains crates; unit in Cargo for building, testing, and sharing crates; has a Cargo.toml
+  - Created using `cargo new <package>`
+  - Cargo.toml describes how to build crates in the package
+  - May contain any number of binary crates, but at most only one library crate
+  - Must contain at least one crate
+  - `src/main.rs` is the crate root of a binary crate with the same name as the package
+  - `src/lib.rs` is the crate root of a library crate with the same name as the package
+  - Each file in `src/bin` is the crate root for a separate binary crate
+- Workspace: contains projects
+- Progression: multiple modules -> multiple files
+
