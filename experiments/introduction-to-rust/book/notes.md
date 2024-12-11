@@ -163,10 +163,25 @@ Based on progress through the [Rust Book](https://doc.rust-lang.org/book/).
 
 ## Match
 
-- `match` expression has arms
-- An arm is of the form `<pattern> => <logic>`
+- `match` expression has arms; an arm is of the form `<pattern> => <logic>`
+- Patterns must be exhaustive
 - Each arm is checked in order
-- An underscore in a variant acts as a wildcard
+- Can bind variables in the pattern; function as wildcards with named results
+  - Use an underscore for the variable name to ignore the value
+- Use the unit type as the logic for a noop
+- Definition:
+
+```rust
+match coin {
+    Coin::Penny => 1,
+    Coin::Nickel => 5,
+    Coin::Dime => 10,
+    Coin::Quarter(state) => {
+        println!("State quarter from {state:?}!");
+        25
+    }
+}
+```
 
 ## Style
 
