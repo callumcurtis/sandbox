@@ -310,9 +310,14 @@ cargo doc --open
 - See the [API guidelines](https://rust-lang.github.io/api-guidelines/)
 - Path: way of naming an item (e.g., struct, function, module)
   - Shortcuts created using `use`
+  - Aliases created using `as`
+  - Re-exporting: `pub use <path>;`
   - Can use paths to any modules within the same crate
   - Absolute: beginning from `crate` root
   - Relative: beginning with `self`, `super`, or an identifier in the current module
+  - By convention, bring functions' parent modules into scope and types directly into scope
+  - Nested paths: allow reusing path prefixes; e.g., `use std::{cmp::Ordering, io};`
+  - Glob: `*`; brings all public items defined in a path into scope; useful for test modules and preludes
 - Module: unit of scope
   - By default, contents of a module are private from ancestor modules
   - Conversely, child modules can use items in their ancestors
@@ -328,6 +333,7 @@ cargo doc --open
 - Crate: tree of modules that produce a library (library crate) or executable (binary crate)
   - Smallest/atomic unit considered by the Rust compiler
   - Root: source file the compiler starts with for the crate; root module named `crate`
+  - The standard library is a crate named `std`; external crates have their own unique names
 - Package: contains crates; unit in Cargo for building, testing, and sharing crates; has a Cargo.toml
   - Created using `cargo new <package> [--lib]`
   - Cargo.toml describes how to build crates in the package
