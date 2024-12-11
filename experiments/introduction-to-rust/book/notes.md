@@ -308,12 +308,21 @@ cargo doc --open
 ## Project Structure
 
 - Path: way of naming an item (e.g., struct, function, module)
-- Module: unit of scope; `use`
+  - Shortcuts created using `use`
+  - Can use any paths to modules within the same crate
+- Module: unit of scope
+  - By default, contents of a module are private from parent modules
+  - `pub` makes a module or an item in a module accessible from parent modules
+  - Module resolution begins at the crate root
+  - Resolution order: when a module is declared its implementation is resolved from one of these places
+    1. Inline, within curly braces; e.g., `mod <module> { ... }`
+    2. In the file `<module>.rs`, relative to the directory of the file where the module is declared
+    3. In the file `<module>/mod.rs`, relative to the directory of the file where the module is declared
 - Crate: tree of modules that produce a library (library crate) or executable (binary crate)
   - Smallest/atomic unit considered by the Rust compiler
-  - Root: source file the compiler starts with for the crate; root module
+  - Root: source file the compiler starts with for the crate; root module named `crate`
 - Package: contains crates; unit in Cargo for building, testing, and sharing crates; has a Cargo.toml
-  - Created using `cargo new <package>`
+  - Created using `cargo new <package> [--lib]`
   - Cargo.toml describes how to build crates in the package
   - May contain any number of binary crates, but at most only one library crate
   - Must contain at least one crate
