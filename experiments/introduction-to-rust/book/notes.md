@@ -169,19 +169,31 @@ Based on progress through the [Rust Book](https://doc.rust-lang.org/book/).
 - Can bind variables in the pattern; function as wildcards with named results
   - Use an underscore for the variable name to ignore the value
 - Use the unit type as the logic for a noop
-- Definition:
+- Definition: e.g.,
 
-```rust
-match coin {
-    Coin::Penny => 1,
-    Coin::Nickel => 5,
-    Coin::Dime => 10,
-    Coin::Quarter(state) => {
-        println!("State quarter from {state:?}!");
-        25
-    }
-}
-```
+  ```rust
+  match coin {
+      Coin::Penny => 1,
+      Coin::Nickel => 5,
+      Coin::Dime => 10,
+      Coin::Quarter(state) => {
+          println!("State quarter from {state:?}!");
+          25
+      }
+  }
+  ```
+
+## If Let
+
+- `if let` expresses a single arm from a match expression
+- Used instead of a match expression when a single non-exhaustive arm is desired
+- Definition: e.g.,
+
+  ```rust
+  if let Some(max) = config_max {
+      println!("The maximum is configured to be {max}");
+  }
+  ```
 
 ## Style
 
