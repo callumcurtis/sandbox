@@ -307,12 +307,19 @@ cargo doc --open
 
 ## Project Structure
 
+- See the [API guidelines](https://rust-lang.github.io/api-guidelines/)
 - Path: way of naming an item (e.g., struct, function, module)
   - Shortcuts created using `use`
-  - Can use any paths to modules within the same crate
+  - Can use paths to any modules within the same crate
+  - Absolute: beginning from `crate` root
+  - Relative: beginning with `self`, `super`, or an identifier in the current module
 - Module: unit of scope
-  - By default, contents of a module are private from parent modules
+  - By default, contents of a module are private from ancestor modules
+  - Conversely, child modules can use items in their ancestors
   - `pub` makes a module or an item in a module accessible from parent modules
+  - Making a module public only makes it addressable by ancestors, it does not make the items within public
+  - Struct fields have visibility independent of each other and their enclosing type; fields can be marked `pub`
+  - Enum types can be marked `pub`, in which case all variants are public
   - Module resolution begins at the crate root
   - Resolution order: when a module is declared its implementation is resolved from one of these places
     1. Inline, within curly braces; e.g., `mod <module> { ... }`
