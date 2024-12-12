@@ -105,7 +105,7 @@ Based on progress through the [Rust Book](https://doc.rust-lang.org/book/).
   - Example: `'counting_up: loop { ... }`
   - Begins with single quote
 - `while <condition> { ... }`
-- `for <identifier> in <iterable> { ... }`
+- `for <identifier> in <iterable> { ... }`; e.g., `for i in &<vec> { ... }`
 
 ## Functions
 
@@ -345,4 +345,13 @@ cargo doc --open
   - Each file in `src/bin` is the crate root for a separate binary crate
 - Workspace: contains projects
 - Progression: multiple modules -> multiple files
+
+## Collections
+
+- Besides primitives (array and tuple), are stored on the heap
+- Vector: continuous in memory; homogeneous types; can use enum variants or a trait object for heterogeneity
+  - Instantiation: `let v: Vec<i32> = Vec::new();`; using `vec!` macro: `let v = vec![1, 2, 3];`
+  - `get(<index>)` gives `Option` result, `&<vec>[<index>]` panics if OOB
+- String
+- HashMap
 
