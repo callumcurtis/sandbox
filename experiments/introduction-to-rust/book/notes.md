@@ -350,7 +350,7 @@ cargo doc --open
 ## Collections
 
 - Besides primitives (array and tuple), are stored on the heap
-- Vector: continuous in memory; homogeneous types; can use enum variants or a trait object for heterogeneity
+- Vector: contiguous in memory; homogeneous types; can use enum variants or a trait object for heterogeneity
   - Instantiation: `let v: Vec<i32> = Vec::new();`; using `vec!` macro: `let v = vec![1, 2, 3];`
   - `get(<index>)` gives `Option` result, `&<vec>[<index>]` panics if OOB
 - String: wrapper around `Vec<u8>` with methods to interpret as UTF-8
@@ -358,5 +358,7 @@ cargo doc --open
   - Cannot index, as UTF-8 characters can occupy more than one byte
   - Three valid interpretations: bytes, unicode scalar values (`char`), grapheme clusters (not in std lib)
   - Can slice to get a string slice; will panic if unaligned with char boundaries
-- HashMap
+- HashMap: not in prelude; `new`, `insert`, `get`; iterable over key-value pairs
+  - `entry` returns an `Entry` variant that enables conditional behavior based on key existence
+  - By default, uses SipHash; resistant to DoS attacks at the cost of performance
 
