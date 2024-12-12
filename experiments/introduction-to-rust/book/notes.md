@@ -64,8 +64,9 @@ Based on progress through the [Rust Book](https://doc.rust-lang.org/book/).
 
 ## String Literals
 
+- `str`; string slice; UTF-8 encoded data stored elsewhere
+- String literals are encoded in the program's binary
 - Surrounded in double quotes
-- Slice in the binary
 
 ## Scope Block
 
@@ -352,6 +353,10 @@ cargo doc --open
 - Vector: continuous in memory; homogeneous types; can use enum variants or a trait object for heterogeneity
   - Instantiation: `let v: Vec<i32> = Vec::new();`; using `vec!` macro: `let v = vec![1, 2, 3];`
   - `get(<index>)` gives `Option` result, `&<vec>[<index>]` panics if OOB
-- String
+- String: wrapper around `Vec<u8>` with methods to interpret as UTF-8
+  - Concatenation: `+` operator or `format!` macro
+  - Cannot index, as UTF-8 characters can occupy more than one byte
+  - Three valid interpretations: bytes, unicode scalar values (`char`), grapheme clusters (not in std lib)
+  - Can slice to get a string slice; will panic if unaligned with char boundaries
 - HashMap
 
