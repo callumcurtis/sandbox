@@ -371,4 +371,5 @@ cargo doc --open
 - Consider propagating `Result` for handling by higher-level code
   - Use `?` to return `Err` immediately; use `From` trait on `Err` return type to convert
 - `main` can have signature `Result<(), E>`, or any type implementing the `Termination` trait
+- Default to using `Result` and propagating errors; use `panic` for contracts, prototyping, and tests
 
