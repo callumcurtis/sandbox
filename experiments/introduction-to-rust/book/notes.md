@@ -362,3 +362,9 @@ cargo doc --open
   - `entry` returns an `Entry` variant that enables conditional behavior based on key existence
   - By default, uses SipHash; resistant to DoS attacks at the cost of performance
 
+## Error Handling
+
+- Two classes: recoverable (`Result`) and unrecoverable (`panic`)
+- By default, Rust unwinds the stack on panic, but can be configured to abort immediately
+- Set `RUST_BACKTRACE=1` to see backtrace on panic
+
