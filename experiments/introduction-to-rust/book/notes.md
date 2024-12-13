@@ -154,13 +154,13 @@ Based on progress through the [Rust Book](https://doc.rust-lang.org/book/).
 ## Enums
 
 - Enum states are called variants
-- `Ok`/`Err` as `Return` variants for error handling
 - Definition: e.g., `enum IpAddr { V4(u8, u8, u8, u8), V6 {x: i32, y: i32} }`
   - Unnamed fields, named fields, or no fields
 - Instantiation: each variant has a unique constructor; e.g., `let four = IpAddr::V4(127, 0, 0, 1);`
 - Enums can contain any data type, including **structs** and other enums
 - Can `impl` associated functions for an enum
-- `None`/`Some` as `Option` variants for null handling; included in prelude
+- `None`/`Some` as `Option` variants for null handling; included in prelude; can use `?` operator
+- `Ok`/`Err` as `Result` variants for error handling; included in prelude; can use `?` operator
 
 ## Match
 
@@ -367,4 +367,8 @@ cargo doc --open
 - Two classes: recoverable (`Result`) and unrecoverable (`panic`)
 - By default, Rust unwinds the stack on panic, but can be configured to abort immediately
 - Set `RUST_BACKTRACE=1` to see backtrace on panic
+- Rather than using `match` for `Result`, consider `unwrap_or_else` and `expect`
+- Consider propagating `Result` for handling by higher-level code
+  - Use `?` to return `Err` immediately; use `From` trait on `Err` return type to convert
+- `main` can have signature `Result<(), E>`, or any type implementing the `Termination` trait
 
