@@ -203,6 +203,8 @@ Based on progress through the [Rust Book](https://doc.rust-lang.org/book/).
 - Local variables: snake_case
 - Constants: UPPER_SNAKE_CASE
 - Functions: snake_case
+- Types: UpperCamelCase
+- Generics: UpperCamelCase, short, often one letter
 
 ## Cargo
 
@@ -372,4 +374,33 @@ cargo doc --open
   - Use `?` to return `Err` immediately; use `From` trait on `Err` return type to convert
 - `main` can have signature `Result<(), E>`, or any type implementing the `Termination` trait
 - Default to using `Result` and propagating errors; use `panic` for contracts, prototyping, and tests
+
+## Generics
+
+- Function: `fn largest<T>(list: &[T]) -> &T { ... }`
+- Struct: `struct Point<T, U> { x: T, y: U }`
+- Enum: `enum Option<T> { Some(T), None }`
+- Method:
+
+  ```rust
+  struct Point<T> {
+      x: T,
+      y: T,
+  }
+
+  impl<T> Point<T> {
+      fn x(&self) -> &T {
+          &self.x
+      }
+  }
+
+  impl Point<f32> {
+      fn distance_from_origin(&self) -> f32 {
+          (self.x.powi(2) + self.y.powi(2)).sqrt()
+      }
+  }
+  ```
+
+- Lifetimes: variety of generics that inform the compiler about relationships between references
+- Performance: generics resolved at compile-time using monomorphization (same as C++ templates)
 
