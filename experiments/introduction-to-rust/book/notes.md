@@ -404,3 +404,38 @@ cargo doc --open
 - Lifetimes: variety of generics that inform the compiler about relationships between references
 - Performance: generics resolved at compile-time using monomorphization (same as C++ templates)
 
+## Traits
+
+- Definition:
+
+  ```rust
+  pub trait Summary {
+      fn summarize(&self) -> String;
+  }
+
+  impl Summary for Tweet {
+      fn summarize(&self) -> String {
+          format!("{}: {}", self.username, self.content)
+      }
+  }
+  ```
+
+- Can specify default method implementations; default cannot be called from overriding implementation
+- Can implement a trait on a type iff either the trait or the type, or both, are local to your crate ("coherence")
+- Trait bounds: e.g., `pub fn notify(item: &impl Summary) { ... }` or `pub fn notify<T: Summary>(item: &T) { ... }`
+  - Multiple: e.g., `pub fn notify(item: &(impl Summary + Display)) { ... }` or `pub fn notify<T: Summary + Display>(item: &T) { ... }`
+  - `where` clause: declutters signature; e.g.,
+
+    ```rust
+    fn some_function<T, U>(t: &T, u: &U) -> i32
+    where
+        T: Display + Clone,
+        U: Clone + Debug,
+    { ... }
+    ```
+
+- Conditional method implementation: e.g., `impl<T: Display + PartialOrd> Pair<T> { ... }`
+- Blanket implementations: conditionally implement a trait for any type that implements another trait
+  - e.g., `impl<T: Display> ToString for T { ... }`
+- Returns: e.g., `fn returns_summarizable() -> impl Summary { ... }`
+
