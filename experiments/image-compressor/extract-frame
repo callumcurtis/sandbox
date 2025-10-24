@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+
+if [ $# -ne 3 ]; then
+    echo "Usage: $0 <input_file> <frame_number> <output_file>"
+    exit 1
+fi
+
+input_file="$1"
+frame_number="$2"
+output_file="$3"
+
+ffmpeg -i "$input_file" -pixel_format yuv420p -frames:v 1 -vf "select=eq(n\\,$frame_number)" "$output_file"
