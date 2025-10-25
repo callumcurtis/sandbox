@@ -17,6 +17,7 @@
             python313
             python313Packages.numpy
             ffmpeg_6
+            imagemagick
           ];
         };
       });
