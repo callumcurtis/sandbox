@@ -16,6 +16,7 @@ num_planes = 3
 class Config:
     quantization_dtype: np.dtype = np.int32
     quantization_enabled: bool = True
+    delta_enabled: bool = False
 
 config = Config()
 
@@ -134,42 +135,12 @@ def undo_zigzag(zigzagged: np.ndarray) -> np.ndarray:
                 col -= 1
     return unzigzagged
 
-def do_predict_sequence(sequence: np.ndarray) -> np.ndarray:
-    max_points = 3
+def do_delta(sequence: np.ndarray) -> np.ndarray:
+    # Use the previous value to predict the next value
+    return np.concatenate([[sequence[0]], sequence[1:] - sequence[:-1]])
 
-    predictions = np.zeros(sequence.size, dtype=sequence.dtype)
-
-    sum_of_x = 0
-    sum_of_x_squared = 0
-    sum_of_xy = 0
-    sum_of_y = sequence[0].item()
-
-    for i in range(1, sequence.size):
-        num_points = min(i, max_points)
-
-        if num_points == 1:
-            slope = 0
-        else:
-            slope = (num_points * sum_of_xy - sum_of_x * sum_of_y) / (num_points * sum_of_x_squared - sum_of_x**2)
-
-        intercept = (sum_of_y - slope * sum_of_x) / num_points
-        predictions[i] = slope * i + intercept
-        sum_of_x += i
-        sum_of_x_squared += i**2
-        sum_of_xy += i * sequence[i].item()
-        sum_of_y += sequence[i].item()
-
-        if i >= max_points:
-            leaving_i = i - max_points
-            sum_of_x -= leaving_i
-            sum_of_x_squared -= leaving_i**2
-            sum_of_xy -= leaving_i * sequence[leaving_i].item()
-            sum_of_y -= sequence[leaving_i].item()
-
-    return predictions
-
-def do_delta(sequence: np.ndarray, predictions: np.ndarray) -> np.ndarray:
-    return sequence - predictions
+def undo_delta(delta: np.ndarray) -> np.ndarray:
+    return np.cumsum(delta)
 
 dct_matrix = make_dct_matrix(block_size)
 luminance_quantization_matrix = np.array([
@@ -203,12 +174,13 @@ for i, (plane, quantization_matrix) in enumerate([
 ]):
     blocks_by_plane_ind.append([])
     for block in do_flatten_blocks(do_blockify(plane, block_size)):
-        dct_block = do_dct(block, dct_matrix)
-        quantized_block = do_quantize(dct_block, quantization_matrix if config.quantization_enabled else 1, config.quantization_dtype)
-        zigzagged_block = do_zigzag(quantized_block)
-        blocks_by_plane_ind[i].append(zigzagged_block)
-        # predicted_block = predict_sequence(zigzagged_block)
-        # delta_compressed_block = delta(zigzagged_block, predicted_block)
+        block = do_dct(block, dct_matrix)
+        block = do_quantize(block, quantization_matrix if config.quantization_enabled else 1, config.quantization_dtype)
+        block = do_zigzag(block)
+        if config.delta_enabled:
+            block = do_delta(block)
+        blocks_by_plane_ind[i].append(block)
+
 
 assert len(blocks_by_plane_ind) == num_planes
 
@@ -221,6 +193,8 @@ for i, (w, h, quantization_matrix) in enumerate([
 ]):
     unflattened_blocks = make_unflattened_block_container(w, h, block_size)
     for j, block in enumerate(blocks_by_plane_ind[i]):
+        if config.delta_enabled:
+            block = undo_delta(block)
         block = undo_zigzag(block)
         block = undo_quantize(block, quantization_matrix if config.quantization_enabled else 1)
         block = undo_dct(block, dct_matrix)
