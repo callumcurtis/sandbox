@@ -17,8 +17,14 @@ class Config:
     quantization_dtype: np.dtype = np.int32
     quantization_enabled: bool = True
     delta_enabled: bool = False
+    truncate_to: int = block_size**2 // 2
+    truncate_enabled: bool = True
+
 
 config = Config()
+if not config.truncate_enabled:
+    config.truncate_to = block_size**2
+
 
 # Read the YUV file from stdin in bytes
 yuv_bytes = sys.stdin.buffer.read()
@@ -135,6 +141,12 @@ def undo_zigzag(zigzagged: np.ndarray) -> np.ndarray:
                 col -= 1
     return unzigzagged
 
+def do_truncate(sequence: np.ndarray, truncate_to: int) -> np.ndarray:
+    return sequence[:truncate_to]
+
+def undo_truncate(sequence: np.ndarray, truncate_to: int, block_size: int) -> np.ndarray:
+    return np.concatenate([sequence, np.zeros(block_size**2 - truncate_to)])
+
 def do_delta(sequence: np.ndarray) -> np.ndarray:
     # Use the previous value to predict the next value
     return np.concatenate([[sequence[0]], sequence[1:] - sequence[:-1]])
@@ -177,6 +189,7 @@ for i, (plane, quantization_matrix) in enumerate([
         block = do_dct(block, dct_matrix)
         block = do_quantize(block, quantization_matrix if config.quantization_enabled else 1, config.quantization_dtype)
         block = do_zigzag(block)
+        block = do_truncate(block, config.truncate_to)
         if config.delta_enabled:
             block = do_delta(block)
         blocks_by_plane_ind[i].append(block)
@@ -195,6 +208,7 @@ for i, (w, h, quantization_matrix) in enumerate([
     for j, block in enumerate(blocks_by_plane_ind[i]):
         if config.delta_enabled:
             block = undo_delta(block)
+        block = undo_truncate(block, config.truncate_to, block_size)
         block = undo_zigzag(block)
         block = undo_quantize(block, quantization_matrix if config.quantization_enabled else 1)
         block = undo_dct(block, dct_matrix)
