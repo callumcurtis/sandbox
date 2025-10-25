@@ -17,7 +17,7 @@ class Config:
     quantization_dtype: np.dtype = np.int32
     quantization_enabled: bool = True
     delta_enabled: bool = False
-    truncate_to: int = block_size**2 // 2
+    truncate_to: int = 10
     truncate_enabled: bool = True
 
 
