@@ -14,8 +14,10 @@
       {
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
-            python313
-            python313Packages.numpy
+            python312
+            python312Packages.numpy
+            python312Packages.scipy
+            python312Packages.matplotlib
             ffmpeg_6
             imagemagick
           ];

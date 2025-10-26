@@ -1,6 +1,8 @@
 import sys
 
 import numpy as np
+import scipy.ndimage as ndimage
+import matplotlib.pyplot as plt
 
 
 width, height = 352, 288
@@ -15,10 +17,10 @@ num_planes = 3
 
 class Config:
     quantization_dtype: np.dtype = np.int32
-    quantization_enabled: bool = True
+    quantization_enabled: bool = False
     delta_enabled: bool = False
     truncate_to: int = 10
-    truncate_enabled: bool = True
+    truncate_enabled: bool = False
 
 
 config = Config()
@@ -181,8 +183,8 @@ blocks_by_plane_ind = []
 # Compress
 for i, (plane, quantization_matrix) in enumerate([
     (Y, luminance_quantization_matrix),
+    (Cr, chroma_quantization_matrix),
     (Cb, chroma_quantization_matrix),
-    (Cr, chroma_quantization_matrix)
 ]):
     blocks_by_plane_ind.append([])
     for block in do_flatten_blocks(do_blockify(plane, block_size)):
@@ -194,11 +196,8 @@ for i, (plane, quantization_matrix) in enumerate([
             block = do_delta(block)
         blocks_by_plane_ind[i].append(block)
 
-
-assert len(blocks_by_plane_ind) == num_planes
-
 # Decompress
-decompressed_by_plane_ind = []
+decompressed_planes = []
 for i, (w, h, quantization_matrix) in enumerate([
     (width, height, luminance_quantization_matrix),
     (chroma_width, chroma_height, chroma_quantization_matrix),
@@ -213,9 +212,37 @@ for i, (w, h, quantization_matrix) in enumerate([
         block = undo_quantize(block, quantization_matrix if config.quantization_enabled else 1)
         block = undo_dct(block, dct_matrix)
         undo_flatten_block(unflattened_blocks, block, j)
-    plane = undo_blockify(unflattened_blocks)
-    print(plane)
-    print("\n\n")
-    print(Y)
-    print("\n\n")
-    exit()
+    decompressed_planes.append(undo_blockify(unflattened_blocks))
+
+## Display
+
+
+def YCrCb420_to_YCrCb440(Y: np.ndarray, Cr: np.ndarray, Cb: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    Cb_upsampled = ndimage.zoom(Cb, 2, order=1)
+    Cr_upsampled = ndimage.zoom(Cr, 2, order=1)
+    h, w = Y.shape
+    Cb_upsampled = Cb_upsampled[:h, :w]
+    Cr_upsampled = Cr_upsampled[:h, :w]
+    return Y, Cr_upsampled, Cb_upsampled
+
+def YCrCb440_to_RGB(Y: np.ndarray, Cr: np.ndarray, Cb: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    R = Y + 1.402 * (Cr - 128)
+    G = Y - 0.344136 * (Cb - 128) - 0.714136 * (Cr - 128)
+    B = Y + 1.772 * (Cb - 128)
+    R = np.clip(R, 0, 255)
+    G = np.clip(G, 0, 255)
+    B = np.clip(B, 0, 255)
+    R = R.astype(np.uint8)
+    G = G.astype(np.uint8)
+    B = B.astype(np.uint8)
+    return R, G, B
+
+
+decompressed_RGB = np.stack(YCrCb440_to_RGB(*YCrCb420_to_YCrCb440(*decompressed_planes)), axis=-1)
+
+
+plt.figure()
+plt.imshow(decompressed_RGB)
+plt.title("Decompressed RGB")
+plt.axis("off")
+plt.show()
