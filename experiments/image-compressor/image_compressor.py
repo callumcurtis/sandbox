@@ -16,8 +16,8 @@ block_size = 8
 num_planes = 3
 
 class Config:
-    quantization_dtype: np.dtype = np.int32
-    quantization_enabled: bool = False
+    quantization_dtype: np.dtype = np.int8
+    quantization_enabled: bool = True
     delta_enabled: bool = False
     truncate_to: int = 10
     truncate_enabled: bool = False
@@ -87,7 +87,11 @@ def make_dct_matrix(size: int) -> np.ndarray:
     return matrix
 
 def do_quantize(block: np.ndarray, quantization_matrix: np.ndarray | int, dtype: np.dtype = np.int32) -> np.ndarray:
-    return np.round(block / quantization_matrix).astype(dtype)
+    quantized = np.round(block / quantization_matrix)
+    # Clip the quantized values to fit in the dtype
+    quantized = np.clip(quantized, np.iinfo(dtype).min, np.iinfo(dtype).max)
+    quantized = quantized.astype(dtype)
+    return quantized
 
 def undo_quantize(block: np.ndarray, quantization_matrix: np.ndarray) -> np.ndarray:
     return block * quantization_matrix
@@ -213,6 +217,7 @@ for i, (w, h, quantization_matrix) in enumerate([
         block = undo_dct(block, dct_matrix)
         undo_flatten_block(unflattened_blocks, block, j)
     decompressed_planes.append(undo_blockify(unflattened_blocks))
+
 
 ## Display
 
