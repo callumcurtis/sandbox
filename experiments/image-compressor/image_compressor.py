@@ -18,7 +18,17 @@ num_planes = 3
 class Config:
     transmission_dtype: np.dtype = np.int8
     quantization_enabled: bool = True
+    # Delta-ing the DCT coefficients is not effective as the coefficients are independent.
     delta_enabled: bool = False
+    # Enabling truncation will introduce ringing artifacts, commonly seen as "blockiness"
+    #
+    # From https://commons.und.edu/cgi/viewcontent.cgi?article=4090&context=theses
+    # """
+    # The high frequency component makes the right-side wave more
+    # square shaped. The high frequencies represent sharp contrast edges where this is a
+    # lot of pixel intensity variation. So, if we lose or truncate high frequencies during
+    # JPEG compression then the image will have ringing artifacts. 
+    # """
     truncate_to: int = 10
     truncate_enabled: bool = False
 
@@ -150,7 +160,10 @@ def do_truncate(sequence: np.ndarray, truncate_to: int) -> np.ndarray:
     return sequence[:truncate_to]
 
 def undo_truncate(sequence: np.ndarray, truncate_to: int, block_size: int) -> np.ndarray:
-    return np.concatenate([sequence, np.zeros(block_size**2 - truncate_to)])
+    assert len(sequence) == truncate_to
+    padding_size = block_size**2 - truncate_to
+    assert len(sequence) + padding_size == block_size**2
+    return np.concatenate([sequence, np.zeros(padding_size)])
 
 def do_delta(sequence: np.ndarray) -> np.ndarray:
     # Use the previous value to predict the next value
@@ -190,16 +203,37 @@ for i, (plane, quantization_matrix) in enumerate([
     (Cb, chroma_quantization_matrix),
 ]):
     blocks_by_plane_ind.append([])
-    for block in do_flatten_blocks(do_blockify(plane, block_size)):
+    for j, block in enumerate(do_flatten_blocks(do_blockify(plane, block_size))):
+        do_print = i == 0 and j == 23
+        if do_print:
+            print("Original block:")
+            print(block)
         block = do_dct(block, dct_matrix)
+        if do_print:
+            print("DCTed block:")
+            print(block)
         if config.quantization_enabled:
             block = do_quantize(block, quantization_matrix)
+        if do_print:
+            print("Quantized block:")
+            print(block)
         block = do_shrink_dtype(block, config.transmission_dtype)
+        if do_print:
+            print("Shrunk block:")
+            print(block)
         block = do_zigzag(block)
+        if do_print:
+            print("Zigzagged block:")
+            print(block)
         block = do_truncate(block, config.truncate_to)
         if config.delta_enabled:
             block = do_delta(block)
+        if do_print:
+            print("Truncated block:")
+            print(block)
         blocks_by_plane_ind[i].append(block)
+
+print("\n\n")
 
 # Decompress
 decompressed_planes = []
@@ -210,13 +244,29 @@ for i, (w, h, quantization_matrix) in enumerate([
 ]):
     unflattened_blocks = make_unflattened_block_container(w, h, block_size)
     for j, block in enumerate(blocks_by_plane_ind[i]):
+        do_print = i == 0 and j == 23
+        if do_print:
+            print("Transmitted block:")
+            print(block)
         if config.delta_enabled:
             block = undo_delta(block)
         block = undo_truncate(block, config.truncate_to, block_size)
+        if do_print:
+            print("Un-truncated block:")
+            print(block)
         block = undo_zigzag(block)
+        if do_print:
+            print("Un-zigzagged block:")
+            print(block)
         if config.quantization_enabled:
             block = undo_quantize(block, quantization_matrix)
+        if do_print:
+            print("Un-quantized block:")
+            print(block)
         block = undo_dct(block, dct_matrix)
+        if do_print:
+            print("Un-DCTed block:")
+            print(block)
         undo_flatten_block(unflattened_blocks, block, j)
     decompressed_planes.append(undo_blockify(unflattened_blocks))
 
