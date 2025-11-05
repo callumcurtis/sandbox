@@ -16,7 +16,7 @@ block_size = 8
 num_planes = 3
 
 class Config:
-    quantization_dtype: np.dtype = np.int8
+    transmission_dtype: np.dtype = np.int8
     quantization_enabled: bool = True
     delta_enabled: bool = False
     truncate_to: int = 10
@@ -86,12 +86,11 @@ def make_dct_matrix(size: int) -> np.ndarray:
                 matrix[i, j] = np.cos((2*j+1)*i*np.pi/(2*size)) * np.sqrt(2/size)
     return matrix
 
-def do_quantize(block: np.ndarray, quantization_matrix: np.ndarray | int, dtype: np.dtype = np.int32) -> np.ndarray:
-    quantized = np.round(block / quantization_matrix)
-    # Clip the quantized values to fit in the dtype
-    quantized = np.clip(quantized, np.iinfo(dtype).min, np.iinfo(dtype).max)
-    quantized = quantized.astype(dtype)
-    return quantized
+def do_quantize(block: np.ndarray, quantization_matrix: np.ndarray | int) -> np.ndarray:
+    return np.round(block / quantization_matrix)
+
+def do_shrink_dtype(block: np.ndarray, dtype: np.dtype) -> np.ndarray:
+    return np.clip(block, np.iinfo(dtype).min, np.iinfo(dtype).max).astype(dtype)
 
 def undo_quantize(block: np.ndarray, quantization_matrix: np.ndarray) -> np.ndarray:
     return block * quantization_matrix
@@ -193,7 +192,9 @@ for i, (plane, quantization_matrix) in enumerate([
     blocks_by_plane_ind.append([])
     for block in do_flatten_blocks(do_blockify(plane, block_size)):
         block = do_dct(block, dct_matrix)
-        block = do_quantize(block, quantization_matrix if config.quantization_enabled else 1, config.quantization_dtype)
+        if config.quantization_enabled:
+            block = do_quantize(block, quantization_matrix)
+        block = do_shrink_dtype(block, config.transmission_dtype)
         block = do_zigzag(block)
         block = do_truncate(block, config.truncate_to)
         if config.delta_enabled:
@@ -213,7 +214,8 @@ for i, (w, h, quantization_matrix) in enumerate([
             block = undo_delta(block)
         block = undo_truncate(block, config.truncate_to, block_size)
         block = undo_zigzag(block)
-        block = undo_quantize(block, quantization_matrix if config.quantization_enabled else 1)
+        if config.quantization_enabled:
+            block = undo_quantize(block, quantization_matrix)
         block = undo_dct(block, dct_matrix)
         undo_flatten_block(unflattened_blocks, block, j)
     decompressed_planes.append(undo_blockify(unflattened_blocks))
