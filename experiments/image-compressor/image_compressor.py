@@ -18,8 +18,10 @@ num_planes = 3
 class Config:
     transmission_dtype: np.dtype = np.int8
     quantization_enabled: bool = True
-    # Delta-ing the DCT coefficients is not effective as the coefficients are independent.
-    delta_enabled: bool = False
+    # Delta-ing the DCT DC and AC coefficients within a block is not effective as the coefficients are independent.
+    intra_block_delta_dct_coeff_enabled: bool = False
+    # Delta-ing the DCT DC coefficients between blocks is effective as nearby blocks are likely to have similar values.
+    inter_block_delta_dct_dc_coeff_enabled: bool = True
     # Enabling truncation will introduce ringing artifacts, commonly seen as "blockiness"
     #
     # From https://commons.und.edu/cgi/viewcontent.cgi?article=4090&context=theses
@@ -165,12 +167,21 @@ def undo_truncate(sequence: np.ndarray, truncate_to: int, block_size: int) -> np
     assert len(sequence) + padding_size == block_size**2
     return np.concatenate([sequence, np.zeros(padding_size)])
 
-def do_delta(sequence: np.ndarray) -> np.ndarray:
+def do_delta_within_block(sequence: np.ndarray) -> np.ndarray:
     # Use the previous value to predict the next value
     return np.concatenate([[sequence[0]], sequence[1:] - sequence[:-1]])
 
-def undo_delta(delta: np.ndarray) -> np.ndarray:
+def undo_delta_within_block(delta: np.ndarray) -> np.ndarray:
     return np.cumsum(delta)
+
+def get_nearby_block_ind(block_ind: int, blocks_wide: int) -> int:
+    return block_ind - 1 if block_ind % blocks_wide != 0 else block_ind - blocks_wide
+
+def do_delta_between_blocks(first: np.ndarray, second: np.ndarray) -> np.ndarray:
+    return second - first
+
+def undo_delta_between_blocks(first: np.ndarray, delta: np.ndarray) -> np.ndarray:
+    return first + delta
 
 dct_matrix = make_dct_matrix(block_size)
 luminance_quantization_matrix = np.array([
@@ -203,8 +214,9 @@ for i, (plane, quantization_matrix) in enumerate([
     (Cb, chroma_quantization_matrix),
 ]):
     blocks_by_plane_ind.append([])
+    transmitted_dc_coeffs = np.zeros((plane.shape[0]*plane.shape[1])//(block_size**2), dtype=config.transmission_dtype)
     for j, block in enumerate(do_flatten_blocks(do_blockify(plane, block_size))):
-        do_print = i == 0 and j == 23
+        do_print = i == 0 and j == 41
         if do_print:
             print("Original block:")
             print(block)
@@ -214,23 +226,35 @@ for i, (plane, quantization_matrix) in enumerate([
             print(block)
         if config.quantization_enabled:
             block = do_quantize(block, quantization_matrix)
-        if do_print:
-            print("Quantized block:")
-            print(block)
+            if do_print:
+                print("Quantized block:")
+                print(block)
         block = do_shrink_dtype(block, config.transmission_dtype)
         if do_print:
             print("Shrunk block:")
             print(block)
+        if config.inter_block_delta_dct_dc_coeff_enabled and j > 0:
+            transmitted_dc_coeffs[j] = block[0][0]
+            nearby_block_ind = get_nearby_block_ind(j, plane.shape[1]//block_size)
+            # TODO: try multiple nearby blocks (above and to the right)
+            # TODO: handle the case where the delta overflows the transmission dtype
+            block[0][0] = do_delta_between_blocks(transmitted_dc_coeffs[nearby_block_ind], transmitted_dc_coeffs[j])
+            if do_print:
+                print("Delta-ed between blocks:")
+                print(block)
         block = do_zigzag(block)
         if do_print:
             print("Zigzagged block:")
             print(block)
         block = do_truncate(block, config.truncate_to)
-        if config.delta_enabled:
-            block = do_delta(block)
         if do_print:
             print("Truncated block:")
             print(block)
+        if config.intra_block_delta_dct_coeff_enabled:
+            block = do_delta_within_block(block)
+            if do_print:
+                print("Delta-ed within block:")
+                print(block)
         blocks_by_plane_ind[i].append(block)
 
 print("\n\n")
@@ -242,14 +266,18 @@ for i, (w, h, quantization_matrix) in enumerate([
     (chroma_width, chroma_height, chroma_quantization_matrix),
     (chroma_width, chroma_height, chroma_quantization_matrix)
 ]):
+    transmitted_dc_coeffs = np.zeros((w*h)//(block_size**2), dtype=config.transmission_dtype)
     unflattened_blocks = make_unflattened_block_container(w, h, block_size)
     for j, block in enumerate(blocks_by_plane_ind[i]):
-        do_print = i == 0 and j == 23
+        do_print = i == 0 and j == 41
         if do_print:
             print("Transmitted block:")
             print(block)
-        if config.delta_enabled:
-            block = undo_delta(block)
+        if config.intra_block_delta_dct_coeff_enabled:
+            block = undo_delta_within_block(block)
+            if do_print:
+                print("Un-delta-ed within block:")
+                print(block)
         block = undo_truncate(block, config.truncate_to, block_size)
         if do_print:
             print("Un-truncated block:")
@@ -258,11 +286,19 @@ for i, (w, h, quantization_matrix) in enumerate([
         if do_print:
             print("Un-zigzagged block:")
             print(block)
+        if config.inter_block_delta_dct_dc_coeff_enabled and j > 0:
+            nearby_block_ind = get_nearby_block_ind(j, w//block_size)
+            # TODO: try multiple nearby blocks (above and to the right)
+            block[0][0] = undo_delta_between_blocks(transmitted_dc_coeffs[nearby_block_ind], block[0][0])
+            transmitted_dc_coeffs[j] = block[0][0]
+            if do_print:
+                print("Un-delta-ed between blocks:")
+                print(block)
         if config.quantization_enabled:
             block = undo_quantize(block, quantization_matrix)
-        if do_print:
-            print("Un-quantized block:")
-            print(block)
+            if do_print:
+                print("Un-quantized block:")
+                print(block)
         block = undo_dct(block, dct_matrix)
         if do_print:
             print("Un-DCTed block:")
