@@ -101,8 +101,27 @@ def make_dct_matrix(size: int) -> np.ndarray:
 def do_quantize(block: np.ndarray, quantization_matrix: np.ndarray | int) -> np.ndarray:
     return np.round(block / quantization_matrix)
 
-def do_clip_to_fit_in_n_bits_in_2s_complement(block: np.ndarray, n: int) -> np.ndarray:
-    return np.clip(block, -2**(n-1), 2**(n-1) - 1)
+def clip_and_convert_to_dtype(block: np.ndarray, dtype: np.dtype) -> np.ndarray:
+    return np.clip(block, np.iinfo(dtype).min, np.iinfo(dtype).max).astype(dtype)
+
+def do_map_to_unsigned_int(block: np.ndarray) -> np.ndarray:
+    # Interleave negative and positive values into a single unsigned int8.
+    # All negative numbers are multiplied by -2 and subtracted by 1. All positive numbers are multiplied by 2.
+    # We are using uint8 to represent the result, so the allowed range of the original data is 7 bits.
+    assert block.dtype == np.int8
+    unsigned_block = np.zeros_like(block, dtype=np.uint8)
+    unsigned_block[block > 0] = block[block > 0] * 2
+    unsigned_block[block < 0] = block[block < 0] * -2 - 1
+    return unsigned_block
+
+def undo_map_to_unsigned_int(block: np.ndarray) -> np.ndarray:
+    # All odd non-zero numbers are actually negative, so are added with one and then divided by -2.
+    # All even non-zero numbers are actually positive, so are divided by 2.
+    assert block.dtype == np.uint8
+    signed_block = np.zeros_like(block, dtype=np.int8)
+    signed_block[block % 2 == 1] = block[block % 2 == 1] // -2
+    signed_block[block % 2 == 0] = block[block % 2 == 0] // 2
+    return signed_block
 
 def undo_quantize(block: np.ndarray, quantization_matrix: np.ndarray) -> np.ndarray:
     return block * quantization_matrix
@@ -165,7 +184,7 @@ def undo_truncate(sequence: np.ndarray, truncate_to: int, block_size: int) -> np
     assert len(sequence) == truncate_to
     padding_size = block_size**2 - truncate_to
     assert len(sequence) + padding_size == block_size**2
-    return np.concatenate([sequence, np.zeros(padding_size)])
+    return np.concatenate([sequence, np.zeros(padding_size, dtype=sequence.dtype)])
 
 def do_delta_within_block(sequence: np.ndarray) -> np.ndarray:
     # Use the previous value to predict the next value
@@ -229,11 +248,13 @@ for i, (plane, quantization_matrix) in enumerate([
             if do_print:
                 print("Quantized block:")
                 print(block)
-        # If inter-block delta-ing the DCT DC coefficients, we need to subtract 1 from the max bits per DCT coefficient in transmission
-        # because the maximum delta is twice the range of the DCT DC coefficients.
-        block = do_clip_to_fit_in_n_bits_in_2s_complement(block, config.max_bits_per_dct_coeff_in_transmission - (1 if config.inter_block_delta_dct_dc_coeff_enabled else 0))
+        block = clip_and_convert_to_dtype(block, np.int8)
         if do_print:
-            print(f"Clipped to fit in {config.max_bits_per_dct_coeff_in_transmission - (1 if config.inter_block_delta_dct_dc_coeff_enabled else 0)} bits in 2s complement block:")
+            print("Clipped and converted to int8 block:")
+            print(block)
+        block = do_map_to_unsigned_int(block)
+        if do_print:
+            print("Mapped to unsigned int8 block:")
             print(block)
         if config.inter_block_delta_dct_dc_coeff_enabled and j > 0:
             transmitted_dc_coeffs[j] = block[0][0]
@@ -296,6 +317,10 @@ for i, (w, h, quantization_matrix) in enumerate([
             if do_print:
                 print("Un-delta-ed between blocks:")
                 print(block)
+        block = undo_map_to_unsigned_int(block)
+        if do_print:
+            print("Un-mapped to unsigned int8 block:")
+            print(block)
         if config.quantization_enabled:
             block = undo_quantize(block, quantization_matrix)
             if do_print:
