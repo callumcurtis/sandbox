@@ -16,8 +16,8 @@ block_size = 8
 num_planes = 3
 
 class Config:
-    transmission_dtype: np.dtype = np.int8
     quantization_enabled: bool = True
+    max_bits_per_dct_coeff_in_transmission: int = 9
     # Delta-ing the DCT DC and AC coefficients within a block is not effective as the coefficients are independent.
     intra_block_delta_dct_coeff_enabled: bool = False
     # Delta-ing the DCT DC coefficients between blocks is effective as nearby blocks are likely to have similar values.
@@ -101,8 +101,8 @@ def make_dct_matrix(size: int) -> np.ndarray:
 def do_quantize(block: np.ndarray, quantization_matrix: np.ndarray | int) -> np.ndarray:
     return np.round(block / quantization_matrix)
 
-def do_shrink_dtype(block: np.ndarray, dtype: np.dtype) -> np.ndarray:
-    return np.clip(block, np.iinfo(dtype).min, np.iinfo(dtype).max).astype(dtype)
+def do_clip_to_fit_in_n_bits_in_2s_complement(block: np.ndarray, n: int) -> np.ndarray:
+    return np.clip(block, -2**(n-1), 2**(n-1) - 1)
 
 def undo_quantize(block: np.ndarray, quantization_matrix: np.ndarray) -> np.ndarray:
     return block * quantization_matrix
@@ -214,7 +214,7 @@ for i, (plane, quantization_matrix) in enumerate([
     (Cb, chroma_quantization_matrix),
 ]):
     blocks_by_plane_ind.append([])
-    transmitted_dc_coeffs = np.zeros((plane.shape[0]*plane.shape[1])//(block_size**2), dtype=config.transmission_dtype)
+    transmitted_dc_coeffs = np.zeros((plane.shape[0]*plane.shape[1])//(block_size**2), dtype=np.int32)
     for j, block in enumerate(do_flatten_blocks(do_blockify(plane, block_size))):
         do_print = i == 0 and j == 41
         if do_print:
@@ -229,9 +229,11 @@ for i, (plane, quantization_matrix) in enumerate([
             if do_print:
                 print("Quantized block:")
                 print(block)
-        block = do_shrink_dtype(block, config.transmission_dtype)
+        # If inter-block delta-ing the DCT DC coefficients, we need to subtract 1 from the max bits per DCT coefficient in transmission
+        # because the maximum delta is twice the range of the DCT DC coefficients.
+        block = do_clip_to_fit_in_n_bits_in_2s_complement(block, config.max_bits_per_dct_coeff_in_transmission - (1 if config.inter_block_delta_dct_dc_coeff_enabled else 0))
         if do_print:
-            print("Shrunk block:")
+            print(f"Clipped to fit in {config.max_bits_per_dct_coeff_in_transmission - (1 if config.inter_block_delta_dct_dc_coeff_enabled else 0)} bits in 2s complement block:")
             print(block)
         if config.inter_block_delta_dct_dc_coeff_enabled and j > 0:
             transmitted_dc_coeffs[j] = block[0][0]
@@ -266,7 +268,7 @@ for i, (w, h, quantization_matrix) in enumerate([
     (chroma_width, chroma_height, chroma_quantization_matrix),
     (chroma_width, chroma_height, chroma_quantization_matrix)
 ]):
-    transmitted_dc_coeffs = np.zeros((w*h)//(block_size**2), dtype=config.transmission_dtype)
+    transmitted_dc_coeffs = np.zeros((w*h)//(block_size**2), dtype=np.int32)
     unflattened_blocks = make_unflattened_block_container(w, h, block_size)
     for j, block in enumerate(blocks_by_plane_ind[i]):
         do_print = i == 0 and j == 41
