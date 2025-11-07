@@ -1,4 +1,7 @@
+import math
 import sys
+import enum
+from typing import BinaryIO, Iterator
 
 import numpy as np
 import scipy.ndimage as ndimage
@@ -17,7 +20,6 @@ num_planes = 3
 
 class Config:
     quantization_enabled: bool = True
-    max_bits_per_dct_coeff_in_transmission: int = 9
     # Delta-ing the DCT DC and AC coefficients within a block is not effective as the coefficients are independent.
     intra_block_delta_dct_coeff_enabled: bool = False
     # Delta-ing the DCT DC coefficients between blocks is effective as nearby blocks are likely to have similar values.
@@ -202,6 +204,168 @@ def do_delta_between_blocks(first: np.ndarray, second: np.ndarray) -> np.ndarray
 def undo_delta_between_blocks(first: np.ndarray, delta: np.ndarray) -> np.ndarray:
     return first + delta
 
+class PrefixCode:
+
+    def __init__(self, prefix_code: int, num_bits: int):
+        self.prefix_code = prefix_code
+        self.num_bits = num_bits
+
+class Offset:
+
+    def __init__(self, value: int, num_bits: int):
+        self.value = value
+        self.num_bits = num_bits
+
+class ByteWriter:
+
+    def __init__(self, f: BinaryIO):
+        self.f = f
+        self.byte = 0
+        self.bit_index = 0
+        self.total_bytes_written = 0
+
+    def write_integral(self, value: int, num_bits: int):
+        assert 0 <= value < 2**num_bits
+        for i in range(num_bits):
+            self.byte |= ((value >> (num_bits - i - 1)) & 1) << (7 - self.bit_index)
+            self.bit_index += 1
+            if self.bit_index == 8:
+                print(f"Writing byte: {bin(self.byte)}")
+                self.f.write(bytes([self.byte]))
+                self.byte = 0
+                self.bit_index = 0
+                self.total_bytes_written += 1
+        return self
+
+    def write_prefix_code(self, prefix_code: PrefixCode):
+        self.write_integral(prefix_code.prefix_code, prefix_code.num_bits)
+        return self
+
+    def write_offset(self, offset: Offset):
+        self.write_integral(offset.value, offset.num_bits)
+        return self
+
+    def flush(self):
+        if self.bit_index > 0:
+            self.f.write(bytes([self.byte]))
+            self.byte = 0
+            self.bit_index = 0
+            self.total_bytes_written += 1
+        return self
+
+num_bit_bins_for_values = [0] * 9
+num_bit_bins_for_lengths_of_runs_of_zeros = [0] * 7
+bins_for_prefix_codes_for_lengths_of_runs_of_zeros = {}
+length_bins_for_runs_of_zeros = [0] * 65
+
+prefix_code_and_offset_by_length_of_run_of_zeros = []
+
+for length_of_run_of_zeros in range(65):
+    if length_of_run_of_zeros == 0:
+        # 0 (0 bits)
+        offset = None
+        prefix_code = PrefixCode(prefix_code=0b0, num_bits=1)
+    elif length_of_run_of_zeros <= 2:
+        # 1...2 (1 bit)
+        offset = Offset(value=length_of_run_of_zeros-1, num_bits=1)
+        prefix_code = PrefixCode(prefix_code=0b10, num_bits=2)
+    elif length_of_run_of_zeros <= 6:
+        # 3...6 (2 bits)
+        offset = Offset(value=length_of_run_of_zeros-3, num_bits=2)
+        prefix_code = PrefixCode(prefix_code=0b1110, num_bits=4)
+    elif length_of_run_of_zeros <= 14:
+        # 7...14 (3 bits)
+        offset = Offset(value=length_of_run_of_zeros-7, num_bits=3)
+        prefix_code = PrefixCode(prefix_code=0b111110, num_bits=6)
+    elif length_of_run_of_zeros <= 30:
+        # 15...30 (4 bits)
+        offset = Offset(value=length_of_run_of_zeros-15, num_bits=4)
+        prefix_code = PrefixCode(prefix_code=0b111111, num_bits=6)
+    elif length_of_run_of_zeros <= 62:
+        # 31...62 (5 bits)
+        offset = Offset(value=length_of_run_of_zeros-31, num_bits=5)
+        prefix_code = PrefixCode(prefix_code=0b110, num_bits=3)
+    else:
+        # 63...64 (1 bit)
+        offset = Offset(value=length_of_run_of_zeros-63, num_bits=1)
+        prefix_code = PrefixCode(prefix_code=0b11110, num_bits=5)
+    prefix_code_and_offset_by_length_of_run_of_zeros.append((prefix_code, offset))
+    bins_for_prefix_codes_for_lengths_of_runs_of_zeros[prefix_code.prefix_code] = 0
+
+def write_entropy_encoded_block(block: np.ndarray, byte_writer: ByteWriter):
+    assert block.dtype == np.uint8
+    assert block.shape == (block_size ** 2,)
+
+    def prefix_code_and_offset_for_non_zero_value(value: int) -> tuple[PrefixCode, Offset]:
+        if value == 0:
+            num_bits = 0
+        else:
+            num_bits = math.floor(np.log2(value)) + 1
+        assert num_bits <= 8
+
+        # 6 symbols for 6 bits => 19630 bytes in the test file
+        if num_bits == 0:
+            num_bits = 1
+        if num_bits == 6 or num_bits == 7:
+            num_bits = 8
+        prefix_code = {
+            1: PrefixCode(prefix_code=0b00, num_bits=2),
+            2: PrefixCode(prefix_code=0b01, num_bits=2),
+            3: PrefixCode(prefix_code=0b10, num_bits=2),
+            4: PrefixCode(prefix_code=0b110, num_bits=3),
+            5: PrefixCode(prefix_code=0b1110, num_bits=4),
+            8: PrefixCode(prefix_code=0b1111, num_bits=4),
+        }[num_bits]
+
+        num_bit_bins_for_values[num_bits] += 1
+
+        offset = Offset(value=value, num_bits=num_bits)
+        return (prefix_code, offset)
+
+    def prefix_code_and_offset_for_run_of_zeros(length: int) -> tuple[PrefixCode, Offset | None]:
+        length_bins_for_runs_of_zeros[length] += 1
+        if length == 0:
+            num_bits = 0
+        else:
+            num_bits = math.floor(np.log2(length)) + 1
+        assert num_bits <= 6
+        num_bit_bins_for_lengths_of_runs_of_zeros[num_bits] += 1
+        prefix_code, offset = prefix_code_and_offset_by_length_of_run_of_zeros[length]
+        bins_for_prefix_codes_for_lengths_of_runs_of_zeros[prefix_code.prefix_code] += 1
+        return prefix_code, offset
+
+    num_coeffs_written = 0
+    while num_coeffs_written < block.size:
+        prefix_code, offset = prefix_code_and_offset_for_non_zero_value(block[num_coeffs_written])
+        print(f"Prefix code: {prefix_code.prefix_code}|{prefix_code.num_bits}")
+        print(f"Offset: {offset.value}|{offset.num_bits}")
+        byte_writer.write_prefix_code(prefix_code)
+        byte_writer.write_offset(offset)
+        num_coeffs_written += 1
+        if num_coeffs_written == block.size:
+            break
+        run_of_zeros_length = 0
+        while num_coeffs_written < block.size and block[num_coeffs_written] == 0:
+            run_of_zeros_length += 1
+            num_coeffs_written += 1
+        print(f"Run of zeros length: {run_of_zeros_length}")
+        prefix_code, offset = prefix_code_and_offset_for_run_of_zeros(run_of_zeros_length)
+        print(f"Prefix code: {prefix_code.prefix_code}|{prefix_code.num_bits}")
+        if offset is not None:
+            print(f"Offset: {offset.value}|{offset.num_bits}")
+        byte_writer.write_prefix_code(prefix_code)
+        if offset is not None:
+            byte_writer.write_offset(offset)
+        num_coeffs_written += run_of_zeros_length
+
+def write_plain_block(block: np.ndarray, byte_writer: ByteWriter):
+    for value in block:
+        byte_writer.write_integral(value, 8)
+
+def read_entropy_encoded_blocks(f: BinaryIO) -> Iterator[np.ndarray]:
+    # TODO
+    pass
+
 dct_matrix = make_dct_matrix(block_size)
 luminance_quantization_matrix = np.array([
     [16, 11, 10, 16, 24, 40, 51, 61],
@@ -224,7 +388,9 @@ chroma_quantization_matrix = np.array([
     [99, 99, 99, 99, 99, 99, 99, 99]
 ], dtype=np.float32)
 
-blocks_by_plane_ind = []
+fwrite = open("compressed", "wb")
+
+byte_writer = ByteWriter(fwrite)
 
 # Compress
 for i, (plane, quantization_matrix) in enumerate([
@@ -232,10 +398,9 @@ for i, (plane, quantization_matrix) in enumerate([
     (Cr, chroma_quantization_matrix),
     (Cb, chroma_quantization_matrix),
 ]):
-    blocks_by_plane_ind.append([])
     transmitted_dc_coeffs = np.zeros((plane.shape[0]*plane.shape[1])//(block_size**2), dtype=np.int32)
     for j, block in enumerate(do_flatten_blocks(do_blockify(plane, block_size))):
-        do_print = i == 0 and j == 41
+        do_print = i == 0 and j < 3
         if do_print:
             print("Original block:")
             print(block)
@@ -278,9 +443,21 @@ for i, (plane, quantization_matrix) in enumerate([
             if do_print:
                 print("Delta-ed within block:")
                 print(block)
-        blocks_by_plane_ind[i].append(block)
+        write_entropy_encoded_block(block, byte_writer)
+        # write_plain_block(block, byte_writer)
+
+byte_writer.flush()
+fwrite.close()
 
 print("\n\n")
+print(f"Total bytes written: {byte_writer.total_bytes_written}")
+print(f"Frequencies of bit bins for values: {num_bit_bins_for_values}")
+print(f"Frequencies of bit bins for lengths of runs of zeros: {num_bit_bins_for_lengths_of_runs_of_zeros}")
+print(f"Frequencies of length bins for runs of zeros: {length_bins_for_runs_of_zeros}")
+print(f"Frequencies of prefix codes for lengths of runs of zeros: {bins_for_prefix_codes_for_lengths_of_runs_of_zeros}")
+print("\n\n")
+
+fread = open("compressed", "rb")
 
 # Decompress
 decompressed_planes = []
@@ -291,8 +468,8 @@ for i, (w, h, quantization_matrix) in enumerate([
 ]):
     transmitted_dc_coeffs = np.zeros((w*h)//(block_size**2), dtype=np.int32)
     unflattened_blocks = make_unflattened_block_container(w, h, block_size)
-    for j, block in enumerate(blocks_by_plane_ind[i]):
-        do_print = i == 0 and j == 41
+    for j, block in enumerate(read_entropy_encoded_blocks(fread)):
+        do_print = i == 0 and j < 3
         if do_print:
             print("Transmitted block:")
             print(block)
@@ -332,6 +509,8 @@ for i, (w, h, quantization_matrix) in enumerate([
             print(block)
         undo_flatten_block(unflattened_blocks, block, j)
     decompressed_planes.append(undo_blockify(unflattened_blocks))
+
+fread.close()
 
 
 ## Display
