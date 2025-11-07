@@ -1,12 +1,10 @@
 import math
 import sys
-import enum
 from typing import BinaryIO, Iterator
 
 import numpy as np
 import scipy.ndimage as ndimage
 import matplotlib.pyplot as plt
-
 
 width, height = 352, 288
 chroma_ratio_width, chroma_ratio_height = 2, 2
@@ -359,12 +357,31 @@ def write_entropy_encoded_block(block: np.ndarray, byte_writer: ByteWriter):
         num_coeffs_written += run_of_zeros_length
 
 def write_plain_block(block: np.ndarray, byte_writer: ByteWriter):
+    assert block.shape == (block_size**2,)
+    assert block.dtype == np.uint8
     for value in block:
         byte_writer.write_integral(value, 8)
 
 def read_entropy_encoded_blocks(f: BinaryIO) -> Iterator[np.ndarray]:
     # TODO
     pass
+
+def read_plain_blocks(f: BinaryIO, num_blocks: int) -> Iterator[np.ndarray]:
+    block = np.zeros((block_size ** 2), dtype=np.uint8)
+    num_bytes_in_block = 0
+    current_block = 0
+    while byte := f.read(1):
+        # TODO: enforce byteorder for portability
+        block[num_bytes_in_block] = int.from_bytes(byte, byteorder=sys.byteorder)
+        num_bytes_in_block += 1
+        if num_bytes_in_block == block_size ** 2:
+            yield block
+            current_block += 1
+            if current_block == num_blocks:
+                return
+            num_bytes_in_block = 0
+            block = np.zeros((block_size ** 2), dtype=np.uint8)
+    assert num_bytes_in_block == 0
 
 dct_matrix = make_dct_matrix(block_size)
 luminance_quantization_matrix = np.array([
@@ -425,7 +442,6 @@ for i, (plane, quantization_matrix) in enumerate([
             transmitted_dc_coeffs[j] = block[0][0]
             nearby_block_ind = get_nearby_block_ind(j, plane.shape[1]//block_size)
             # TODO: try multiple nearby blocks (above and to the right)
-            # TODO: handle the case where the delta overflows the transmission dtype
             block[0][0] = do_delta_between_blocks(transmitted_dc_coeffs[nearby_block_ind], transmitted_dc_coeffs[j])
             if do_print:
                 print("Delta-ed between blocks:")
@@ -443,8 +459,8 @@ for i, (plane, quantization_matrix) in enumerate([
             if do_print:
                 print("Delta-ed within block:")
                 print(block)
-        write_entropy_encoded_block(block, byte_writer)
-        # write_plain_block(block, byte_writer)
+        # write_entropy_encoded_block(block, byte_writer)
+        write_plain_block(block, byte_writer)
 
 byte_writer.flush()
 fwrite.close()
@@ -466,9 +482,10 @@ for i, (w, h, quantization_matrix) in enumerate([
     (chroma_width, chroma_height, chroma_quantization_matrix),
     (chroma_width, chroma_height, chroma_quantization_matrix)
 ]):
-    transmitted_dc_coeffs = np.zeros((w*h)//(block_size**2), dtype=np.int32)
+    num_blocks = (w*h)//(block_size**2)
+    transmitted_dc_coeffs = np.zeros(num_blocks, dtype=np.int32)
     unflattened_blocks = make_unflattened_block_container(w, h, block_size)
-    for j, block in enumerate(read_entropy_encoded_blocks(fread)):
+    for j, block in enumerate(read_plain_blocks(fread, num_blocks)):
         do_print = i == 0 and j < 3
         if do_print:
             print("Transmitted block:")
