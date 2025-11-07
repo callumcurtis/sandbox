@@ -31,7 +31,7 @@ class Config:
     # The high frequency component makes the right-side wave more
     # square shaped. The high frequencies represent sharp contrast edges where this is a
     # lot of pixel intensity variation. So, if we lose or truncate high frequencies during
-    # JPEG compression then the image will have ringing artifacts. 
+    # JPEG compression then the image will have ringing artifacts.
     # """
     truncate_to: int = 10
     truncate_enabled: bool = False
@@ -376,7 +376,7 @@ luminance_quantization_matrix = np.array([
     [24, 35, 55, 64, 81, 104, 113, 92],
     [49, 64, 78, 87, 103, 121, 120, 101],
     [72, 92, 95, 98, 112, 100, 103, 99]
-], dtype=np.float32)
+], dtype=np.float32) * 2
 chroma_quantization_matrix = np.array([
     [17, 18, 24, 47, 99, 99, 99, 99],
     [18, 21, 26, 66, 99, 99, 99, 99],
