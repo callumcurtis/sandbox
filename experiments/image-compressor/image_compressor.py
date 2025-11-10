@@ -218,7 +218,7 @@ class Offset:
         self.num_bits = num_bits
 
     def __repr__(self) -> str:
-        return f"Offset(start={bin(self.start)}, num_bits={self.num_bits})"
+        return f"Offset(start={self.start}, num_bits={self.num_bits})"
 
 class ByteWriter:
 
@@ -281,31 +281,58 @@ class ByteReader:
     def read_byte(self) -> int:
         return self.read_bits(8)
 
-num_bit_bins_for_values = [0] * 9
-num_bit_bins_for_lengths_of_runs_of_zeros = [0] * 7
-bins_for_prefix_codes_for_lengths_of_runs_of_zeros = {}
-length_bins_for_runs_of_zeros = [0] * 65
 
-prefix_code_and_offset_by_length_of_run_of_zeros = []
-run_of_zeros_offset_by_prefix_code = {}
+def expand_prefix_codes_and_offsets(prefix_codes_and_offsets: list[tuple[PrefixCode, Offset]]) -> list[tuple[PrefixCode, Offset]]:
+    out = []
+    for prefix_code, offset in prefix_codes_and_offsets:
+        for i in range(offset.start, offset.start + 2**offset.num_bits):
+            out.append((prefix_code, offset))
+    return out
 
-# TODO: use value as key rather than number of bits in value
-# TODO: use staggered offset starts
-prefix_code_and_offset_by_num_bits_in_non_zero_value = [
-    (PrefixCode(prefix_code=0b00, num_bits=2), Offset(start=0, num_bits=1)),
-    (PrefixCode(prefix_code=0b00, num_bits=2), Offset(start=0, num_bits=1)),
-    (PrefixCode(prefix_code=0b01, num_bits=2), Offset(start=0, num_bits=2)),
-    (PrefixCode(prefix_code=0b10, num_bits=2), Offset(start=0, num_bits=3)),
-    (PrefixCode(prefix_code=0b110, num_bits=3), Offset(start=0, num_bits=4)),
-    (PrefixCode(prefix_code=0b1110, num_bits=4), Offset(start=0, num_bits=5)),
-    (PrefixCode(prefix_code=0b1111, num_bits=4), Offset(start=0, num_bits=8)),
-    (PrefixCode(prefix_code=0b1111, num_bits=4), Offset(start=0, num_bits=8)),
-    (PrefixCode(prefix_code=0b1111, num_bits=4), Offset(start=0, num_bits=8)),
+
+prefix_codes_and_offsets_for_runs_of_zeros = [
+    (PrefixCode(prefix_code=0b0, num_bits=1), Offset(start=0, num_bits=0)),
+    (PrefixCode(prefix_code=0b10, num_bits=2), Offset(start=1, num_bits=1)),
+    (PrefixCode(prefix_code=0b1110, num_bits=4), Offset(start=3, num_bits=2)),
+    (PrefixCode(prefix_code=0b111110, num_bits=6), Offset(start=7, num_bits=3)),
+    (PrefixCode(prefix_code=0b111111, num_bits=6), Offset(start=15, num_bits=4)),
+    (PrefixCode(prefix_code=0b110, num_bits=3), Offset(start=31, num_bits=5)),
+    (PrefixCode(prefix_code=0b11110, num_bits=5), Offset(start=63, num_bits=1)),
 ]
+prefix_code_and_offset_by_length_of_run_of_zeros = expand_prefix_codes_and_offsets(prefix_codes_and_offsets_for_runs_of_zeros)
+run_of_zeros_offset_by_prefix_code = {
+    prefix_code: offset
+    for prefix_code, offset in prefix_codes_and_offsets_for_runs_of_zeros
+}
+bins_for_prefix_codes_for_lengths_of_runs_of_zeros = {prefix_code: 0 for prefix_code, _ in prefix_codes_and_offsets_for_runs_of_zeros}
+
+
+prefix_codes_and_offsets_for_non_zero_values = [
+    (PrefixCode(prefix_code=0b1100, num_bits=4), Offset(start=0, num_bits=0)),
+    (PrefixCode(prefix_code=0b0, num_bits=1), Offset(start=1, num_bits=1)),
+    (PrefixCode(prefix_code=0b10, num_bits=2), Offset(start=3, num_bits=2)),
+    (PrefixCode(prefix_code=0b1101, num_bits=4), Offset(start=7, num_bits=3)),
+    (PrefixCode(prefix_code=0b11110, num_bits=5), Offset(start=15, num_bits=4)),
+    (PrefixCode(prefix_code=0b111110, num_bits=6), Offset(start=31, num_bits=5)),
+    (PrefixCode(prefix_code=0b111111, num_bits=6), Offset(start=63, num_bits=6)),
+    (PrefixCode(prefix_code=0b1110, num_bits=4), Offset(start=127, num_bits=7)),
+]
+prefix_code_and_offset_by_non_zero_value = expand_prefix_codes_and_offsets(prefix_codes_and_offsets_for_non_zero_values)
 non_zero_value_offset_by_prefix_code = {
     prefix_code: offset
-    for prefix_code, offset in prefix_code_and_offset_by_num_bits_in_non_zero_value
+    for prefix_code, offset in prefix_codes_and_offsets_for_non_zero_values
 }
+bins_for_prefix_codes_for_non_zero_values = {prefix_code: 0 for prefix_code, _ in prefix_codes_and_offsets_for_non_zero_values}
+
+
+def do_clip_to_range_of_non_zero_values(block: np.ndarray) -> np.ndarray:
+    largest_offset = prefix_codes_and_offsets_for_non_zero_values[-1][1]
+    maximum = largest_offset.start + 2**largest_offset.num_bits - 1
+    difference = block[block > maximum] - maximum
+    # Make sure to subtract by an even number since we are in the interleaved/unsigned int world
+    difference += (difference % 2)
+    block[block > maximum] -= difference
+    return block
 
 class PrefixCodeNode:
 
@@ -335,9 +362,7 @@ def build_prefix_code_tree(prefix_codes: list[PrefixCode]) -> PrefixCodeNode:
 
     return root
 
-non_zero_value_prefix_code_tree = build_prefix_code_tree([
-    prefix_code for prefix_code, _ in prefix_code_and_offset_by_num_bits_in_non_zero_value
-])
+non_zero_value_prefix_code_tree = build_prefix_code_tree([prefix_code for prefix_code, _ in prefix_codes_and_offsets_for_non_zero_values])
 
 def decode_prefix_code(byte_reader: ByteReader, prefix_tree_root: PrefixCodeNode) -> PrefixCode:
     curr = prefix_tree_root
@@ -350,39 +375,6 @@ def decode_prefix_code(byte_reader: ByteReader, prefix_tree_root: PrefixCodeNode
     assert curr and curr.prefix_code is not None
     return curr.prefix_code
 
-for length_of_run_of_zeros in range(65):
-    if length_of_run_of_zeros == 0:
-        # 0 (0 bits)
-        offset = None
-        prefix_code = PrefixCode(prefix_code=0b0, num_bits=1)
-    elif length_of_run_of_zeros <= 2:
-        # 1...2 (1 bit)
-        offset = Offset(start=1, num_bits=1)
-        prefix_code = PrefixCode(prefix_code=0b10, num_bits=2)
-    elif length_of_run_of_zeros <= 6:
-        # 3...6 (2 bits)
-        offset = Offset(start=3, num_bits=2)
-        prefix_code = PrefixCode(prefix_code=0b1110, num_bits=4)
-    elif length_of_run_of_zeros <= 14:
-        # 7...14 (3 bits)
-        offset = Offset(start=7, num_bits=3)
-        prefix_code = PrefixCode(prefix_code=0b111110, num_bits=6)
-    elif length_of_run_of_zeros <= 30:
-        # 15...30 (4 bits)
-        offset = Offset(start=15, num_bits=4)
-        prefix_code = PrefixCode(prefix_code=0b111111, num_bits=6)
-    elif length_of_run_of_zeros <= 62:
-        # 31...62 (5 bits)
-        offset = Offset(start=31, num_bits=5)
-        prefix_code = PrefixCode(prefix_code=0b110, num_bits=3)
-    else:
-        # 63...64 (1 bit)
-        offset = Offset(start=63, num_bits=1)
-        prefix_code = PrefixCode(prefix_code=0b11110, num_bits=5)
-    prefix_code_and_offset_by_length_of_run_of_zeros.append((prefix_code, offset))
-    bins_for_prefix_codes_for_lengths_of_runs_of_zeros[prefix_code] = 0
-    run_of_zeros_offset_by_prefix_code[prefix_code] = offset
-
 run_of_zeros_prefix_code_tree = build_prefix_code_tree([
     prefix_code for prefix_code in run_of_zeros_offset_by_prefix_code
 ])
@@ -392,22 +384,11 @@ def write_entropy_encoded_block(block: np.ndarray, byte_writer: ByteWriter):
     assert block.shape == (block_size ** 2,)
 
     def prefix_code_and_offset_for_non_zero_value(value: int) -> tuple[PrefixCode, Offset]:
-        if value == 0:
-            num_bits = 0
-        else:
-            num_bits = math.floor(np.log2(value)) + 1
-        assert num_bits <= 8
+        prefix_code, offset = prefix_code_and_offset_by_non_zero_value[value]
+        bins_for_prefix_codes_for_non_zero_values[prefix_code] += 1
+        return prefix_code, offset
 
-        return prefix_code_and_offset_by_num_bits_in_non_zero_value[num_bits]
-
-    def prefix_code_and_offset_for_run_of_zeros(length: int) -> tuple[PrefixCode, Offset | None]:
-        length_bins_for_runs_of_zeros[length] += 1
-        if length == 0:
-            num_bits = 0
-        else:
-            num_bits = math.floor(np.log2(length)) + 1
-        assert num_bits <= 6
-        num_bit_bins_for_lengths_of_runs_of_zeros[num_bits] += 1
+    def prefix_code_and_offset_for_run_of_zeros(length: int) -> tuple[PrefixCode, Offset]:
         prefix_code, offset = prefix_code_and_offset_by_length_of_run_of_zeros[length]
         bins_for_prefix_codes_for_lengths_of_runs_of_zeros[prefix_code] += 1
         return prefix_code, offset
@@ -417,7 +398,8 @@ def write_entropy_encoded_block(block: np.ndarray, byte_writer: ByteWriter):
         non_zero_value = block[num_coeffs_written]
         prefix_code, offset = prefix_code_and_offset_for_non_zero_value(non_zero_value)
         byte_writer.write_integral(prefix_code.prefix_code, prefix_code.num_bits)
-        byte_writer.write_integral(non_zero_value - offset.start, offset.num_bits)
+        if offset.num_bits > 0:
+            byte_writer.write_integral(non_zero_value - offset.start, offset.num_bits)
         num_coeffs_written += 1
         if num_coeffs_written == block.size:
             break
@@ -427,7 +409,7 @@ def write_entropy_encoded_block(block: np.ndarray, byte_writer: ByteWriter):
             num_coeffs_written += 1
         prefix_code, offset = prefix_code_and_offset_for_run_of_zeros(run_of_zeros_length)
         byte_writer.write_integral(prefix_code.prefix_code, prefix_code.num_bits)
-        if offset is not None:
+        if offset.num_bits > 0:
             byte_writer.write_integral(run_of_zeros_length - offset.start, offset.num_bits)
 
 def write_plain_block(block: np.ndarray, byte_writer: ByteWriter):
@@ -445,7 +427,10 @@ def read_entropy_encoded_blocks(byte_reader: ByteReader, num_blocks: int) -> Ite
             # Read non-zero value
             non_zero_value_prefix_code = decode_prefix_code(byte_reader, non_zero_value_prefix_code_tree)
             non_zero_value_offset = non_zero_value_offset_by_prefix_code[non_zero_value_prefix_code]
-            non_zero_value = byte_reader.read_bits(non_zero_value_offset.num_bits) + non_zero_value_offset.start
+            if non_zero_value_offset.num_bits > 0:
+                non_zero_value = byte_reader.read_bits(non_zero_value_offset.num_bits) + non_zero_value_offset.start
+            else:
+                non_zero_value = non_zero_value_offset.start
             block[num_bytes_in_block] = non_zero_value
             num_bytes_in_block += 1
             if num_bytes_in_block >= block_size ** 2:
@@ -453,10 +438,12 @@ def read_entropy_encoded_blocks(byte_reader: ByteReader, num_blocks: int) -> Ite
             # Read run of zeros
             run_of_zeros_prefix_code = decode_prefix_code(byte_reader, run_of_zeros_prefix_code_tree)
             run_of_zeros_offset = run_of_zeros_offset_by_prefix_code[run_of_zeros_prefix_code]
-            if run_of_zeros_offset is not None:
+            if run_of_zeros_offset.num_bits > 0:
                 run_of_zeros_length = byte_reader.read_bits(run_of_zeros_offset.num_bits) + run_of_zeros_offset.start
-                # The numpy array is already zero-initialized
-                num_bytes_in_block += run_of_zeros_length
+            else:
+                run_of_zeros_length = run_of_zeros_offset.start
+            # The numpy array is already zero-initialize
+            num_bytes_in_block += run_of_zeros_length
         yield block
         block_ind += 1
 
@@ -526,6 +513,9 @@ for i, (plane, quantization_matrix) in enumerate([
         block = do_map_to_unsigned_int(block)
         if do_print:
             print(f"(Compression) converted to unsigned block:\n{block}")
+        block = do_clip_to_range_of_non_zero_values(block)
+        if do_print:
+            print(f"(Compression) clipped to range of non-zero values block:\n{block}")
         if config.inter_block_delta_dct_dc_coeff_enabled and j > 0:
             transmitted_dc_coeffs[j] = block[0][0]
             nearby_block_ind = get_nearby_block_ind(j, plane.shape[1]//block_size)
@@ -551,9 +541,7 @@ fwrite.close()
 
 print("\n\n")
 print(f"Total bytes written: {byte_writer.total_bytes_written}")
-print(f"Frequencies of bit bins for values: {num_bit_bins_for_values}")
-print(f"Frequencies of bit bins for lengths of runs of zeros: {num_bit_bins_for_lengths_of_runs_of_zeros}")
-print(f"Frequencies of length bins for runs of zeros: {length_bins_for_runs_of_zeros}")
+print(f"Frequencies of prefix codes for non-zero values: {bins_for_prefix_codes_for_non_zero_values}")
 print(f"Frequencies of prefix codes for lengths of runs of zeros: {bins_for_prefix_codes_for_lengths_of_runs_of_zeros}")
 print("\n\n")
 
@@ -601,6 +589,7 @@ for i, (w, h, quantization_matrix) in enumerate([
         if do_print:
             print(f"(Decompression) DCTed block:\n{block}")
         block = undo_dct(block, dct_matrix)
+        block = clip_and_convert_to_dtype(block, np.uint8)
         if do_print:
             print(f"(Decompression) original block:\n{block}")
         undo_flatten_block(unflattened_blocks, block, j)
@@ -621,6 +610,9 @@ def YCrCb420_to_YCrCb440(Y: np.ndarray, Cr: np.ndarray, Cb: np.ndarray) -> tuple
     return Y, Cr_upsampled, Cb_upsampled
 
 def YCrCb440_to_RGB(Y: np.ndarray, Cr: np.ndarray, Cb: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    Y = Y.astype(np.float32)
+    Cr = Cr.astype(np.float32)
+    Cb = Cb.astype(np.float32)
     R = Y + 1.402 * (Cr - 128)
     G = Y - 0.344136 * (Cb - 128) - 0.714136 * (Cr - 128)
     B = Y + 1.772 * (Cb - 128)
