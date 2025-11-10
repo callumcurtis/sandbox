@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+
+if [ $# -ne 4 ]; then
+    echo "Usage: $0 <input_file> <width> <height> <output_file>"
+    exit 1
+fi
+
+input_file="$1"
+width="$2"
+height="$3"
+output_file="$4"
+
+ffmpeg -f rawvideo -pixel_format yuv420p -video_size "$width"x"$height" -i "$input_file" -y "$output_file"
+

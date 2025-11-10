@@ -10,3 +10,4 @@ frame_number="$2"
 output_file="$3"
 
 ffmpeg -i "$input_file" -pixel_format yuv420p -frames:v 1 -vf "select=eq(n\\,$frame_number)" "$output_file"
+
