@@ -208,11 +208,17 @@ class PrefixCode:
         self.prefix_code = prefix_code
         self.num_bits = num_bits
 
+    def __repr__(self) -> str:
+        return f"PrefixCode(prefix_code={bin(self.prefix_code)}, num_bits={self.num_bits})"
+
 class Offset:
 
-    def __init__(self, value: int, num_bits: int):
-        self.value = value
+    def __init__(self, start: int, num_bits: int):
+        self.start = start
         self.num_bits = num_bits
+
+    def __repr__(self) -> str:
+        return f"Offset(start={bin(self.start)}, num_bits={self.num_bits})"
 
 class ByteWriter:
 
@@ -228,19 +234,10 @@ class ByteWriter:
             self.byte |= ((value >> (num_bits - i - 1)) & 1) << (7 - self.bit_index)
             self.bit_index += 1
             if self.bit_index == 8:
-                print(f"Writing byte: {bin(self.byte)}")
                 self.f.write(bytes([self.byte]))
                 self.byte = 0
                 self.bit_index = 0
                 self.total_bytes_written += 1
-        return self
-
-    def write_prefix_code(self, prefix_code: PrefixCode):
-        self.write_integral(prefix_code.prefix_code, prefix_code.num_bits)
-        return self
-
-    def write_offset(self, offset: Offset):
-        self.write_integral(offset.value, offset.num_bits)
         return self
 
     def flush(self):
@@ -251,12 +248,107 @@ class ByteWriter:
             self.total_bytes_written += 1
         return self
 
+class ByteReader:
+
+    def __init__(self, f: BinaryIO):
+        self.f = f
+        self.byte = 0
+        self.bit_index = 0
+        self.total_bytes_read = 0
+        self.cache_next_byte_()
+        self.exhausted = False
+
+    def read_bits(self, num_bits: int) -> int:
+        assert not self.exhausted
+        out = 0
+        for i in range(num_bits):
+            out |= ((self.byte >> (7 - self.bit_index)) & 1) << (num_bits - i - 1)
+            self.bit_index += 1
+            if self.bit_index == 8:
+                self.cache_next_byte_()
+        return out
+
+    def cache_next_byte_(self) -> None:
+        byte = self.f.read(1)
+        if not byte:
+            self.exhausted = True
+            return
+        # TODO: enforce byteorder for portability
+        self.byte = int.from_bytes(byte, byteorder=sys.byteorder)
+        self.bit_index = 0
+        self.total_bytes_read += 1
+
+    def read_byte(self) -> int:
+        return self.read_bits(8)
+
 num_bit_bins_for_values = [0] * 9
 num_bit_bins_for_lengths_of_runs_of_zeros = [0] * 7
 bins_for_prefix_codes_for_lengths_of_runs_of_zeros = {}
 length_bins_for_runs_of_zeros = [0] * 65
 
 prefix_code_and_offset_by_length_of_run_of_zeros = []
+run_of_zeros_offset_by_prefix_code = {}
+
+# TODO: use value as key rather than number of bits in value
+# TODO: use staggered offset starts
+prefix_code_and_offset_by_num_bits_in_non_zero_value = [
+    (PrefixCode(prefix_code=0b00, num_bits=2), Offset(start=0, num_bits=1)),
+    (PrefixCode(prefix_code=0b00, num_bits=2), Offset(start=0, num_bits=1)),
+    (PrefixCode(prefix_code=0b01, num_bits=2), Offset(start=0, num_bits=2)),
+    (PrefixCode(prefix_code=0b10, num_bits=2), Offset(start=0, num_bits=3)),
+    (PrefixCode(prefix_code=0b110, num_bits=3), Offset(start=0, num_bits=4)),
+    (PrefixCode(prefix_code=0b1110, num_bits=4), Offset(start=0, num_bits=5)),
+    (PrefixCode(prefix_code=0b1111, num_bits=4), Offset(start=0, num_bits=8)),
+    (PrefixCode(prefix_code=0b1111, num_bits=4), Offset(start=0, num_bits=8)),
+    (PrefixCode(prefix_code=0b1111, num_bits=4), Offset(start=0, num_bits=8)),
+]
+non_zero_value_offset_by_prefix_code = {
+    prefix_code: offset
+    for prefix_code, offset in prefix_code_and_offset_by_num_bits_in_non_zero_value
+}
+
+class PrefixCodeNode:
+
+    def __init__(self, prefix_code: PrefixCode | None = None):
+        self.zero = None
+        self.one = None
+        self.prefix_code = prefix_code
+
+def build_prefix_code_tree(prefix_codes: list[PrefixCode]) -> PrefixCodeNode:
+    root = PrefixCodeNode()
+
+    def add_prefix_code(prefix_code: PrefixCode) -> None:
+        curr = root
+        for i in range(prefix_code.num_bits-1, -1, -1):
+            is_one = bool(prefix_code.prefix_code >> i & 1)
+            if is_one:
+                if not curr.one:
+                    curr.one = PrefixCodeNode(prefix_code=prefix_code if i == 0 else None)
+                curr = curr.one
+            else:
+                if not curr.zero:
+                    curr.zero = PrefixCodeNode(prefix_code=prefix_code if i == 0 else None)
+                curr = curr.zero
+
+    for prefix_code in prefix_codes:
+        add_prefix_code(prefix_code)
+
+    return root
+
+non_zero_value_prefix_code_tree = build_prefix_code_tree([
+    prefix_code for prefix_code, _ in prefix_code_and_offset_by_num_bits_in_non_zero_value
+])
+
+def decode_prefix_code(byte_reader: ByteReader, prefix_tree_root: PrefixCodeNode) -> PrefixCode:
+    curr = prefix_tree_root
+    while curr and not curr.prefix_code:
+        bit = byte_reader.read_bits(1)
+        if bit & 1:
+            curr = curr.one
+        else:
+            curr = curr.zero
+    assert curr and curr.prefix_code is not None
+    return curr.prefix_code
 
 for length_of_run_of_zeros in range(65):
     if length_of_run_of_zeros == 0:
@@ -265,30 +357,35 @@ for length_of_run_of_zeros in range(65):
         prefix_code = PrefixCode(prefix_code=0b0, num_bits=1)
     elif length_of_run_of_zeros <= 2:
         # 1...2 (1 bit)
-        offset = Offset(value=length_of_run_of_zeros-1, num_bits=1)
+        offset = Offset(start=1, num_bits=1)
         prefix_code = PrefixCode(prefix_code=0b10, num_bits=2)
     elif length_of_run_of_zeros <= 6:
         # 3...6 (2 bits)
-        offset = Offset(value=length_of_run_of_zeros-3, num_bits=2)
+        offset = Offset(start=3, num_bits=2)
         prefix_code = PrefixCode(prefix_code=0b1110, num_bits=4)
     elif length_of_run_of_zeros <= 14:
         # 7...14 (3 bits)
-        offset = Offset(value=length_of_run_of_zeros-7, num_bits=3)
+        offset = Offset(start=7, num_bits=3)
         prefix_code = PrefixCode(prefix_code=0b111110, num_bits=6)
     elif length_of_run_of_zeros <= 30:
         # 15...30 (4 bits)
-        offset = Offset(value=length_of_run_of_zeros-15, num_bits=4)
+        offset = Offset(start=15, num_bits=4)
         prefix_code = PrefixCode(prefix_code=0b111111, num_bits=6)
     elif length_of_run_of_zeros <= 62:
         # 31...62 (5 bits)
-        offset = Offset(value=length_of_run_of_zeros-31, num_bits=5)
+        offset = Offset(start=31, num_bits=5)
         prefix_code = PrefixCode(prefix_code=0b110, num_bits=3)
     else:
         # 63...64 (1 bit)
-        offset = Offset(value=length_of_run_of_zeros-63, num_bits=1)
+        offset = Offset(start=63, num_bits=1)
         prefix_code = PrefixCode(prefix_code=0b11110, num_bits=5)
     prefix_code_and_offset_by_length_of_run_of_zeros.append((prefix_code, offset))
-    bins_for_prefix_codes_for_lengths_of_runs_of_zeros[prefix_code.prefix_code] = 0
+    bins_for_prefix_codes_for_lengths_of_runs_of_zeros[prefix_code] = 0
+    run_of_zeros_offset_by_prefix_code[prefix_code] = offset
+
+run_of_zeros_prefix_code_tree = build_prefix_code_tree([
+    prefix_code for prefix_code in run_of_zeros_offset_by_prefix_code
+])
 
 def write_entropy_encoded_block(block: np.ndarray, byte_writer: ByteWriter):
     assert block.dtype == np.uint8
@@ -301,24 +398,7 @@ def write_entropy_encoded_block(block: np.ndarray, byte_writer: ByteWriter):
             num_bits = math.floor(np.log2(value)) + 1
         assert num_bits <= 8
 
-        # 6 symbols for 6 bits => 19630 bytes in the test file
-        if num_bits == 0:
-            num_bits = 1
-        if num_bits == 6 or num_bits == 7:
-            num_bits = 8
-        prefix_code = {
-            1: PrefixCode(prefix_code=0b00, num_bits=2),
-            2: PrefixCode(prefix_code=0b01, num_bits=2),
-            3: PrefixCode(prefix_code=0b10, num_bits=2),
-            4: PrefixCode(prefix_code=0b110, num_bits=3),
-            5: PrefixCode(prefix_code=0b1110, num_bits=4),
-            8: PrefixCode(prefix_code=0b1111, num_bits=4),
-        }[num_bits]
-
-        num_bit_bins_for_values[num_bits] += 1
-
-        offset = Offset(value=value, num_bits=num_bits)
-        return (prefix_code, offset)
+        return prefix_code_and_offset_by_num_bits_in_non_zero_value[num_bits]
 
     def prefix_code_and_offset_for_run_of_zeros(length: int) -> tuple[PrefixCode, Offset | None]:
         length_bins_for_runs_of_zeros[length] += 1
@@ -329,16 +409,15 @@ def write_entropy_encoded_block(block: np.ndarray, byte_writer: ByteWriter):
         assert num_bits <= 6
         num_bit_bins_for_lengths_of_runs_of_zeros[num_bits] += 1
         prefix_code, offset = prefix_code_and_offset_by_length_of_run_of_zeros[length]
-        bins_for_prefix_codes_for_lengths_of_runs_of_zeros[prefix_code.prefix_code] += 1
+        bins_for_prefix_codes_for_lengths_of_runs_of_zeros[prefix_code] += 1
         return prefix_code, offset
 
     num_coeffs_written = 0
     while num_coeffs_written < block.size:
-        prefix_code, offset = prefix_code_and_offset_for_non_zero_value(block[num_coeffs_written])
-        print(f"Prefix code: {prefix_code.prefix_code}|{prefix_code.num_bits}")
-        print(f"Offset: {offset.value}|{offset.num_bits}")
-        byte_writer.write_prefix_code(prefix_code)
-        byte_writer.write_offset(offset)
+        non_zero_value = block[num_coeffs_written]
+        prefix_code, offset = prefix_code_and_offset_for_non_zero_value(non_zero_value)
+        byte_writer.write_integral(prefix_code.prefix_code, prefix_code.num_bits)
+        byte_writer.write_integral(non_zero_value - offset.start, offset.num_bits)
         num_coeffs_written += 1
         if num_coeffs_written == block.size:
             break
@@ -346,15 +425,10 @@ def write_entropy_encoded_block(block: np.ndarray, byte_writer: ByteWriter):
         while num_coeffs_written < block.size and block[num_coeffs_written] == 0:
             run_of_zeros_length += 1
             num_coeffs_written += 1
-        print(f"Run of zeros length: {run_of_zeros_length}")
         prefix_code, offset = prefix_code_and_offset_for_run_of_zeros(run_of_zeros_length)
-        print(f"Prefix code: {prefix_code.prefix_code}|{prefix_code.num_bits}")
+        byte_writer.write_integral(prefix_code.prefix_code, prefix_code.num_bits)
         if offset is not None:
-            print(f"Offset: {offset.value}|{offset.num_bits}")
-        byte_writer.write_prefix_code(prefix_code)
-        if offset is not None:
-            byte_writer.write_offset(offset)
-        num_coeffs_written += run_of_zeros_length
+            byte_writer.write_integral(run_of_zeros_length - offset.start, offset.num_bits)
 
 def write_plain_block(block: np.ndarray, byte_writer: ByteWriter):
     assert block.shape == (block_size**2,)
@@ -362,17 +436,36 @@ def write_plain_block(block: np.ndarray, byte_writer: ByteWriter):
     for value in block:
         byte_writer.write_integral(value, 8)
 
-def read_entropy_encoded_blocks(f: BinaryIO) -> Iterator[np.ndarray]:
-    # TODO
-    pass
+def read_entropy_encoded_blocks(byte_reader: ByteReader, num_blocks: int) -> Iterator[np.ndarray]:
+    block_ind = 0
+    while block_ind < num_blocks:
+        block = np.zeros((block_size ** 2), dtype=np.uint8)
+        num_bytes_in_block = 0
+        while num_bytes_in_block < block_size ** 2:
+            # Read non-zero value
+            non_zero_value_prefix_code = decode_prefix_code(byte_reader, non_zero_value_prefix_code_tree)
+            non_zero_value_offset = non_zero_value_offset_by_prefix_code[non_zero_value_prefix_code]
+            non_zero_value = byte_reader.read_bits(non_zero_value_offset.num_bits) + non_zero_value_offset.start
+            block[num_bytes_in_block] = non_zero_value
+            num_bytes_in_block += 1
+            if num_bytes_in_block >= block_size ** 2:
+                break
+            # Read run of zeros
+            run_of_zeros_prefix_code = decode_prefix_code(byte_reader, run_of_zeros_prefix_code_tree)
+            run_of_zeros_offset = run_of_zeros_offset_by_prefix_code[run_of_zeros_prefix_code]
+            if run_of_zeros_offset is not None:
+                run_of_zeros_length = byte_reader.read_bits(run_of_zeros_offset.num_bits) + run_of_zeros_offset.start
+                # The numpy array is already zero-initialized
+                num_bytes_in_block += run_of_zeros_length
+        yield block
+        block_ind += 1
 
-def read_plain_blocks(f: BinaryIO, num_blocks: int) -> Iterator[np.ndarray]:
+def read_plain_blocks(byte_reader: ByteReader, num_blocks: int) -> Iterator[np.ndarray]:
     block = np.zeros((block_size ** 2), dtype=np.uint8)
     num_bytes_in_block = 0
     current_block = 0
-    while byte := f.read(1):
-        # TODO: enforce byteorder for portability
-        block[num_bytes_in_block] = int.from_bytes(byte, byteorder=sys.byteorder)
+    while byte := byte_reader.read_byte():
+        block[num_bytes_in_block] = byte
         num_bytes_in_block += 1
         if num_bytes_in_block == block_size ** 2:
             yield block
@@ -417,50 +510,41 @@ for i, (plane, quantization_matrix) in enumerate([
 ]):
     transmitted_dc_coeffs = np.zeros((plane.shape[0]*plane.shape[1])//(block_size**2), dtype=np.int32)
     for j, block in enumerate(do_flatten_blocks(do_blockify(plane, block_size))):
-        do_print = i == 0 and j < 3
+        do_print = i == 0 and j == 0
         if do_print:
-            print("Original block:")
-            print(block)
+            print(f"(Compression) original block:\n{block}")
         block = do_dct(block, dct_matrix)
         if do_print:
-            print("DCTed block:")
-            print(block)
+            print(f"(Compression) DCTed block:\n{block}")
         if config.quantization_enabled:
             block = do_quantize(block, quantization_matrix)
             if do_print:
-                print("Quantized block:")
-                print(block)
+                print(f"(Compression) quantized block:\n{block}")
         block = clip_and_convert_to_dtype(block, np.int8)
         if do_print:
-            print("Clipped and converted to int8 block:")
-            print(block)
+            print(f"(Compression) clipped and converted to int block:\n{block}")
         block = do_map_to_unsigned_int(block)
         if do_print:
-            print("Mapped to unsigned int8 block:")
-            print(block)
+            print(f"(Compression) converted to unsigned block:\n{block}")
         if config.inter_block_delta_dct_dc_coeff_enabled and j > 0:
             transmitted_dc_coeffs[j] = block[0][0]
             nearby_block_ind = get_nearby_block_ind(j, plane.shape[1]//block_size)
             # TODO: try multiple nearby blocks (above and to the right)
             block[0][0] = do_delta_between_blocks(transmitted_dc_coeffs[nearby_block_ind], transmitted_dc_coeffs[j])
             if do_print:
-                print("Delta-ed between blocks:")
-                print(block)
+                print(f"(Compression) inter-delta'd DC coefficient block:\n{block}")
         block = do_zigzag(block)
         if do_print:
-            print("Zigzagged block:")
-            print(block)
+            print(f"(Compression) zigzagged block:\n{block}")
         block = do_truncate(block, config.truncate_to)
         if do_print:
-            print("Truncated block:")
-            print(block)
+            print(f"(Compression) truncated block:\n{block}")
         if config.intra_block_delta_dct_coeff_enabled:
             block = do_delta_within_block(block)
             if do_print:
-                print("Delta-ed within block:")
-                print(block)
-        # write_entropy_encoded_block(block, byte_writer)
-        write_plain_block(block, byte_writer)
+                print("(Compression) intra-delta'd AC coefficients block:")
+        write_entropy_encoded_block(block, byte_writer)
+        # write_plain_block(block, byte_writer)
 
 byte_writer.flush()
 fwrite.close()
@@ -474,6 +558,7 @@ print(f"Frequencies of prefix codes for lengths of runs of zeros: {bins_for_pref
 print("\n\n")
 
 fread = open("compressed", "rb")
+byte_reader = ByteReader(fread)
 
 # Decompress
 decompressed_planes = []
@@ -485,45 +570,39 @@ for i, (w, h, quantization_matrix) in enumerate([
     num_blocks = (w*h)//(block_size**2)
     transmitted_dc_coeffs = np.zeros(num_blocks, dtype=np.int32)
     unflattened_blocks = make_unflattened_block_container(w, h, block_size)
-    for j, block in enumerate(read_plain_blocks(fread, num_blocks)):
-        do_print = i == 0 and j < 3
+    for j, block in enumerate(read_entropy_encoded_blocks(byte_reader, num_blocks)):
+        do_print = i == 0 and j == 0
         if do_print:
-            print("Transmitted block:")
-            print(block)
+            print(f"(Decompression) transmitted block:\n{block}")
         if config.intra_block_delta_dct_coeff_enabled:
-            block = undo_delta_within_block(block)
             if do_print:
-                print("Un-delta-ed within block:")
-                print(block)
+                print(f"(Decompression) intra-delta'd AC coefficients block:\n{block}")
+            block = undo_delta_within_block(block)
+        if do_print:
+            print(f"(Decompression) truncated block:\n{block}")
         block = undo_truncate(block, config.truncate_to, block_size)
         if do_print:
-            print("Un-truncated block:")
-            print(block)
+            print(f"(Decompression) zigzagged block:\n{block}")
         block = undo_zigzag(block)
-        if do_print:
-            print("Un-zigzagged block:")
-            print(block)
         if config.inter_block_delta_dct_dc_coeff_enabled and j > 0:
+            if do_print:
+                print(f"(Decompression) inter-delta'd DC coefficient block:\n{block}")
             nearby_block_ind = get_nearby_block_ind(j, w//block_size)
             # TODO: try multiple nearby blocks (above and to the right)
             block[0][0] = undo_delta_between_blocks(transmitted_dc_coeffs[nearby_block_ind], block[0][0])
             transmitted_dc_coeffs[j] = block[0][0]
-            if do_print:
-                print("Un-delta-ed between blocks:")
-                print(block)
-        block = undo_map_to_unsigned_int(block)
         if do_print:
-            print("Un-mapped to unsigned int8 block:")
-            print(block)
+            print(f"(Decompression) converted to unsigned int block:\n{block}")
+        block = undo_map_to_unsigned_int(block)
         if config.quantization_enabled:
-            block = undo_quantize(block, quantization_matrix)
             if do_print:
-                print("Un-quantized block:")
-                print(block)
+                print(f"(Decompression) quantized block:\n{block}")
+            block = undo_quantize(block, quantization_matrix)
+        if do_print:
+            print(f"(Decompression) DCTed block:\n{block}")
         block = undo_dct(block, dct_matrix)
         if do_print:
-            print("Un-DCTed block:")
-            print(block)
+            print(f"(Decompression) original block:\n{block}")
         undo_flatten_block(unflattened_blocks, block, j)
     decompressed_planes.append(undo_blockify(unflattened_blocks))
 
