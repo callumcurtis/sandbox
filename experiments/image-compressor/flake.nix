@@ -20,6 +20,8 @@
             python312Packages.matplotlib
             ffmpeg_6
             imagemagick
+            vlc
+            xxd
           ];
         };
       });
