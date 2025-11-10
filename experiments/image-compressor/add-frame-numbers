@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+
+if [ $# -ne 2 ]; then
+    echo "Usage: $0 <input_file> <output_file>"
+    exit 1
+fi
+
+input_file="$1"
+output_file="$2"
+
+ffmpeg -i "$input_file" -vf "drawtext=fontfile=Arial.ttf: text=%{n}: x=(w-tw)/2: y=h-(2*lh): fontcolor=white: box=1: boxcolor=0x00000099" "$output_file"
+
