@@ -18,6 +18,31 @@
         "type": "github"
       }
     },
+    "flamegraph": {
+      "inputs": {
+        "flake-utils": [
+          "flake-utils"
+        ],
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "dir": "topic/profiling/flamegraph",
+        "lastModified": 1757385430,
+        "narHash": "sha256-U9JMmk5yvbC+r+pEJwMGPkIN8JEY2oxFnInKuRMWG3I=",
+        "ref": "refs/heads/main",
+        "rev": "d70a866ee5a174c8eab9d7cb0b2bb92ab87e4088",
+        "revCount": 6,
+        "type": "git",
+        "url": "ssh://git@github.com/callumcurtis/snippets"
+      },
+      "original": {
+        "dir": "topic/profiling/flamegraph",
+        "type": "git",
+        "url": "ssh://git@github.com/callumcurtis/snippets"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1762482733,
@@ -37,6 +62,7 @@
     "root": {
       "inputs": {
         "flake-utils": "flake-utils",
+        "flamegraph": "flamegraph",
         "nixpkgs": "nixpkgs"
       }
     },

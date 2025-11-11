@@ -440,6 +440,12 @@ def compress(
             print(f"No more frames to compress; number of frames compressed: {frame_ind}", file=sys.stderr)
             break
         blockified_frame_planes = blockify_frame_planes(frame_planes, block_size)
+        # TODO: encode resolution
+        # TODO: encode quality level
+        # TODO: B-frames
+        # TODO: motion vectors
+        # TODO: sync frames
+        # TODO: dynamic huffman codes for each saga
         compressed_blockified_frame_planes = compress_blockified_frame_planes(
             blockified_frame_planes,
             dct_matrix,
@@ -479,6 +485,7 @@ def decompress(
     while not is_last_frame:
         print(f"Decompressing frame {frame_ind}", file=sys.stderr)
         unflattened_blocks_by_plane = []
+        # TODO: only print after decompressing all planes
         for (plane_width, plane_height, quantization_matrix) in [
             (width, height, luminance_quantization_matrix),
             (width // chrominance_subsampling_factor, height // chrominance_subsampling_factor, chrominance_quantization_matrix),

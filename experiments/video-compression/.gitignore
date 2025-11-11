@@ -1,6 +1,9 @@
 # direnv
 .direnv
 
+# vscode
+.vscode
+
 # images
 *.yuv
 
@@ -10,3 +13,10 @@ scratch/
 # artifacts
 compressed*
 decompressed*
+
+# derived data
+data/derived
+
+# profiling
+flamegraph.svg
+
