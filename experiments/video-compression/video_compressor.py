@@ -1,5 +1,6 @@
 import sys
 from typing import BinaryIO, Callable, Iterator
+import enum
 
 import numpy as np
 import pydantic
@@ -168,11 +169,14 @@ class Offset:
 
 class OutputBitStream:
 
-    def __init__(self, f: BinaryIO):
+    def __init__(self, f: BinaryIO, sync_frame_marker_byte: int, sync_frame_marker_escape_byte: int, sync_frame_special_character_xor_byte: int):
         self.f = f
         self.byte = 0
         self.bit_index = 0
         self.total_bytes_written = 0
+        self.sync_frame_marker_byte = sync_frame_marker_byte
+        self.sync_frame_marker_escape_byte = sync_frame_marker_escape_byte
+        self.sync_frame_special_character_xor_byte = sync_frame_special_character_xor_byte
 
     def write_integral(self, value: int, num_bits: int):
         assert 0 <= value < 2**num_bits
@@ -180,29 +184,40 @@ class OutputBitStream:
             self.byte |= ((value >> (num_bits - i - 1)) & 1) << (7 - self.bit_index)
             self.bit_index += 1
             if self.bit_index == 8:
-                self.f.write(bytes([self.byte]))
-                self.byte = 0
-                self.bit_index = 0
-                self.total_bytes_written += 1
+                self.flush()
         return self
 
     def flush(self):
-        if self.bit_index > 0:
-            self.f.write(bytes([self.byte]))
-            self.byte = 0
-            self.bit_index = 0
+        if self.bit_index == 0:
+            return self
+        if self.byte == self.sync_frame_marker_byte or self.byte == self.sync_frame_marker_escape_byte:
+            self.f.write(bytes([self.sync_frame_marker_escape_byte]))
             self.total_bytes_written += 1
+            self.byte ^= self.sync_frame_special_character_xor_byte
+        self.f.write(bytes([self.byte]))
+        self.total_bytes_written += 1
+        self.byte = 0
+        self.bit_index = 0
+        return self
+
+    def write_reserved_sync_frame_marker(self):
+        assert self.bit_index == 0
+        self.f.write(bytes([self.sync_frame_marker_byte]))
+        self.total_bytes_written += 1
         return self
 
 class InputBitStream:
 
-    def __init__(self, f: BinaryIO):
+    def __init__(self, f: BinaryIO, sync_frame_marker_byte: int, sync_frame_marker_escape_byte: int, sync_frame_special_character_xor_byte: int):
         self.f = f
         self.byte = 0
         self.bit_index = 0
         self.total_bytes_read = 0
-        self.cache_next_byte_()
+        self.sync_frame_marker_byte = sync_frame_marker_byte
+        self.sync_frame_marker_escape_byte = sync_frame_marker_escape_byte
+        self.sync_frame_special_character_xor_byte = sync_frame_special_character_xor_byte
         self.exhausted = False
+        self.step_()
 
     def read_bits(self, num_bits: int) -> int:
         if self.exhausted:
@@ -215,7 +230,8 @@ class InputBitStream:
                 self.cache_next_byte_()
         return out
 
-    def cache_next_byte_(self) -> None:
+    def step_(self) -> None:
+        assert not self.exhausted
         byte = self.f.read(1)
         if not byte:
             self.exhausted = True
@@ -224,6 +240,22 @@ class InputBitStream:
         self.byte = int.from_bytes(byte, byteorder=sys.byteorder)
         self.bit_index = 0
         self.total_bytes_read += 1
+
+    def cache_next_byte_(self) -> None:
+        self.step_()
+        while not self.exhausted and self.byte == self.sync_frame_marker_byte:
+            self.step_()
+        if self.byte == self.sync_frame_marker_escape_byte:
+            self.step_()
+            if not self.exhausted:
+                self.byte ^= self.sync_frame_special_character_xor_byte
+                assert self.byte == self.sync_frame_marker_byte or self.byte == self.sync_frame_marker_escape_byte
+
+    def discard_up_to_and_including_sync_frame_marker(self) -> None:
+        while not self.exhausted and self.byte != self.sync_frame_marker_byte:
+            self.step_()
+        if not self.exhausted:
+            self.step_()
 
 def expand_prefix_codes_and_offsets(prefix_codes_and_offsets: list[tuple[PrefixCode, Offset]]) -> list[tuple[PrefixCode, Offset]]:
     out = []
@@ -441,6 +473,11 @@ def blockify_frame_planes(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     return tuple(blockify_frame_plane(frame_plane, block_size) for frame_plane in frame_planes)
 
+class Quality(enum.Enum):
+    LOW = 0
+    MEDIUM = 1
+    HIGH = 2
+
 def compress(
     input_buffer: BinaryIO,
     height: int,
@@ -453,6 +490,8 @@ def compress(
     prefix_code_and_offset_by_value: list[tuple[PrefixCode, Offset]],
     prefix_code_and_offset_by_length_of_run_of_zeros: list[tuple[PrefixCode, Offset]],
     output_bit_stream: OutputBitStream,
+    sync_frame_interval: int,
+    quality: Quality,
 ) -> None:
     frame_ind = 0
     while True:
@@ -480,6 +519,13 @@ def compress(
             chrominance_quantization_matrix,
             prefix_code_and_offset_by_value[-1][1],
         )
+        if frame_ind % sync_frame_interval == 0:
+            # The sync frame marker must be byte-aligned.
+            output_bit_stream.flush()
+            output_bit_stream.write_reserved_sync_frame_marker()
+            output_bit_stream.write_integral(width, 16)
+            output_bit_stream.write_integral(height, 16)
+            output_bit_stream.write_integral(quality.value, 2)
         write_blockified_frame_planes(
             compressed_blockified_frame_planes,
             lambda block: write_entropy_encoded_flattened_block(
@@ -491,6 +537,7 @@ def compress(
             )
         )
         frame_ind += 1
+    output_bit_stream.flush()
 
 def decompress(
     input_bit_stream: InputBitStream,
@@ -506,11 +553,19 @@ def decompress(
     value_offset_by_prefix_code: dict[PrefixCode, Offset],
     length_of_run_of_zeros_offset_by_prefix_code: dict[PrefixCode, Offset],
     output_buffer: BinaryIO,
+    sync_frame_interval: int,
+    quality: Quality,
 ) -> None:
     frame_ind = 0
     is_last_frame = False
     while not is_last_frame:
         print(f"Decompressing frame {frame_ind}", file=sys.stderr)
+        if frame_ind % sync_frame_interval == 0:
+            input_bit_stream.discard_up_to_and_including_sync_frame_marker()
+            if not input_bit_stream.exhausted:
+                assert input_bit_stream.read_bits(16) == width
+                assert input_bit_stream.read_bits(16) == height
+                assert input_bit_stream.read_bits(2) == quality.value
         unflattened_blocks_by_plane = []
         # TODO: only print after decompressing all planes
         for (plane_width, plane_height, quantization_matrix) in [
@@ -580,7 +635,9 @@ class Meta(pydantic.BaseModel):
     prefix_tree_root_for_lengths_of_runs_of_zeros: PrefixCodeNode
     value_offset_by_prefix_code: dict[PrefixCode, Offset]
     length_of_run_of_zeros_offset_by_prefix_code: dict[PrefixCode, Offset]
-
+    sync_frame_marker_byte: int
+    sync_frame_marker_escape_byte: int
+    sync_frame_special_character_xor_byte: int
     model_config = pydantic.ConfigDict(arbitrary_types_allowed=True)
 
 def make_meta(height: int, width: int) -> Meta:
@@ -637,6 +694,9 @@ def make_meta(height: int, width: int) -> Meta:
         prefix_tree_root_for_lengths_of_runs_of_zeros=build_prefix_code_tree([p for p, _ in prefix_codes_and_offsets_for_lengths_of_runs_of_zeros]),
         value_offset_by_prefix_code={p: o for p, o in prefix_codes_and_offsets_for_values},
         length_of_run_of_zeros_offset_by_prefix_code={p: o for p, o in prefix_codes_and_offsets_for_lengths_of_runs_of_zeros},
+        sync_frame_marker_byte=0xFF,
+        sync_frame_marker_escape_byte=0xFE,
+        sync_frame_special_character_xor_byte=0x80,
     )
 
 if __name__ == "__main__":
@@ -649,7 +709,6 @@ if __name__ == "__main__":
         sys.exit(1)
     is_compressing = sys.argv[1] == "compress"
     if is_compressing:
-        output_bit_stream = OutputBitStream(sys.stdout.buffer)
         compress(
             input_buffer=sys.stdin.buffer,
             height=meta.height,
@@ -661,12 +720,23 @@ if __name__ == "__main__":
             chrominance_subsampling_factor=meta.chrominance_subsampling_factor,
             prefix_code_and_offset_by_value=meta.prefix_code_and_offset_by_value,
             prefix_code_and_offset_by_length_of_run_of_zeros=meta.prefix_code_and_offset_by_length_of_run_of_zeros,
-            output_bit_stream=output_bit_stream,
+            output_bit_stream=OutputBitStream(
+                sys.stdout.buffer,
+                meta.sync_frame_marker_byte,
+                meta.sync_frame_marker_escape_byte,
+                meta.sync_frame_special_character_xor_byte,
+            ),
+            sync_frame_interval=30, # TODO: tune
+            quality=Quality.LOW, # TODO: actually use the quality level
         )
-        output_bit_stream.flush()
     else:
         decompress(
-            input_bit_stream=InputBitStream(sys.stdin.buffer),
+            input_bit_stream=InputBitStream(
+                sys.stdin.buffer,
+                meta.sync_frame_marker_byte,
+                meta.sync_frame_marker_escape_byte,
+                meta.sync_frame_special_character_xor_byte,
+            ),
             height=meta.height,
             width=meta.width,
             block_size=meta.block_size,
@@ -679,4 +749,6 @@ if __name__ == "__main__":
             value_offset_by_prefix_code=meta.value_offset_by_prefix_code,
             length_of_run_of_zeros_offset_by_prefix_code=meta.length_of_run_of_zeros_offset_by_prefix_code,
             output_buffer=sys.stdout.buffer,
+            sync_frame_interval=30, # TODO: tune
+            quality=Quality.LOW, # TODO: actually use the quality level
         )
