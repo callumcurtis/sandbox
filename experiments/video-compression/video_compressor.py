@@ -541,8 +541,6 @@ def compress(
 
 def decompress(
     input_bit_stream: InputBitStream,
-    height: int,
-    width: int,
     block_size: int,
     dct_matrix: np.ndarray,
     luminance_quantization_matrix: np.ndarray,
@@ -554,7 +552,6 @@ def decompress(
     length_of_run_of_zeros_offset_by_prefix_code: dict[PrefixCode, Offset],
     output_buffer: BinaryIO,
     sync_frame_interval: int,
-    quality: Quality,
 ) -> None:
     frame_ind = 0
     is_last_frame = False
@@ -563,9 +560,9 @@ def decompress(
         if frame_ind % sync_frame_interval == 0:
             input_bit_stream.discard_up_to_and_including_sync_frame_marker()
             if not input_bit_stream.exhausted:
-                assert input_bit_stream.read_bits(16) == width
-                assert input_bit_stream.read_bits(16) == height
-                assert input_bit_stream.read_bits(2) == quality.value
+                width = input_bit_stream.read_bits(16)
+                height = input_bit_stream.read_bits(16)
+                quality = Quality(input_bit_stream.read_bits(2))
         unflattened_blocks_by_plane = []
         # TODO: only print after decompressing all planes
         for (plane_width, plane_height, quantization_matrix) in [
@@ -741,8 +738,6 @@ if __name__ == "__main__":
                 meta.sync_frame_marker_escape_byte,
                 meta.sync_frame_special_character_xor_byte,
             ),
-            height=meta.height,
-            width=meta.width,
             block_size=meta.block_size,
             dct_matrix=meta.dct_matrix,
             luminance_quantization_matrix=meta.luminance_quantization_matrix,
@@ -754,5 +749,4 @@ if __name__ == "__main__":
             length_of_run_of_zeros_offset_by_prefix_code=meta.length_of_run_of_zeros_offset_by_prefix_code,
             output_buffer=sys.stdout.buffer,
             sync_frame_interval=meta.sync_frame_interval,
-            quality=meta.quality,
         )
