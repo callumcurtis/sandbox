@@ -116,7 +116,34 @@ def get_nearby_block_pos(block_pos: tuple[int, int], blocks_shape: tuple[int, in
     return (block_row, block_col - 1)
 
 def do_delta_between_blocks(first: np.ndarray, second: np.ndarray) -> np.ndarray:
-    return second - first
+    dtype = np.int8
+    assert first.dtype == second.dtype == dtype
+    dtype_range = np.iinfo(dtype).max - np.iinfo(dtype).min + 1
+    dtype_min = np.iinfo(dtype).min
+    dtype_max = np.iinfo(dtype).max
+    half_dtype_range = dtype_range // 2
+    if second == first:
+        # Case 1: second is equal to first
+        delta = 0
+    elif second < first:
+        if first - second >= half_dtype_range:
+            # Case 2: second is much smaller than first
+            # Then use a positive delta that will overflow first to go back to second
+            delta = (second - dtype_min) + (dtype_max + 1 - first)
+        else:
+            # Case 3: second is a little smaller than first
+            # Then use a negative delta that will go back to second
+            delta = second - first
+    else:
+        if second - first >= half_dtype_range:
+            # Case 4: second is much larger than first
+            # Then use a negative delta that will underflow first to go forward to second
+            delta = (dtype_min - first) - (dtype_max + 1 - second)
+        else:
+            # Case 5: second is a little larger than first
+            # Then use a positive delta that will go forward to second
+            delta = second - first
+    return delta
 
 def undo_delta_between_blocks(first: np.ndarray, delta: np.ndarray) -> np.ndarray:
     return first + delta
@@ -354,19 +381,19 @@ def compress_blockified_frame_plane(
         blockified_frame_plane.shape[1],
         blockified_frame_plane.shape[2] * blockified_frame_plane.shape[3],
     ), dtype=np.uint8)
-    dc_coefficient_by_block = np.zeros(blockified_frame_plane.shape[:-2], dtype=np.uint8)
+    dc_coefficient_by_block = np.zeros(blockified_frame_plane.shape[:-2], dtype=np.int8)
     for block_row in range(blockified_frame_plane.shape[0]):
         for block_col in range(blockified_frame_plane.shape[1]):
             block = blockified_frame_plane[block_row, block_col]
             block = do_dct(block, dct_matrix)
             block = do_quantize(block, quantization_matrix)
             block = clip_and_convert_to_dtype(block, np.int8)
-            block = do_map_to_unsigned_int(block)
-            block = do_clip_to_range_of_values(block, maximum_value_offset)
             if not (block_row == 0 and block_col == 0):
                 dc_coefficient_by_block[block_row, block_col] = block[0, 0]
                 nearby_block_row, nearby_block_col = get_nearby_block_pos((block_row, block_col), blockified_frame_plane.shape[:-2])
                 block[0, 0] = do_delta_between_blocks(dc_coefficient_by_block[nearby_block_row, nearby_block_col], dc_coefficient_by_block[block_row, block_col])
+            block = do_map_to_unsigned_int(block)
+            block = do_clip_to_range_of_values(block, maximum_value_offset)
             block = do_zigzag(block)
             compressed_blocks[block_row, block_col] = block
     return compressed_blocks
@@ -442,7 +469,7 @@ def compress(
         blockified_frame_planes = blockify_frame_planes(frame_planes, block_size)
         # TODO: encode resolution
         # TODO: encode quality level
-        # TODO: B-frames
+        # TODO: B-frames (0.015 bits per pixel) and P-frames (0.1 bits per pixel)
         # TODO: motion vectors
         # TODO: sync frames
         # TODO: dynamic huffman codes for each saga
@@ -494,7 +521,7 @@ def decompress(
             num_blocks = plane_width * plane_height // (block_size ** 2)
             blocks_wide = (plane_width+block_size-1)//block_size
             blocks_high = (plane_height+block_size-1)//block_size
-            dc_coefficients_by_block = np.zeros((blocks_high, blocks_wide), dtype=np.uint8)
+            dc_coefficients_by_block = np.zeros((blocks_high, blocks_wide), dtype=np.int8)
             unflattened_blocks = np.zeros((blocks_high, blocks_wide, block_size, block_size), dtype=np.uint8)
             unflattened_blocks_by_plane.append(unflattened_blocks)
             try:
@@ -515,11 +542,11 @@ def decompress(
                 block_row = block_ind // blocks_wide
                 block_col = block_ind % blocks_wide
                 block = undo_zigzag(block)
+                block = undo_map_to_unsigned_int(block)
                 if block_ind > 0:
                     nearby_block_row, nearby_block_col = get_nearby_block_pos((block_row, block_col), (blocks_high, blocks_wide))
                     block[0, 0] = undo_delta_between_blocks(dc_coefficients_by_block[nearby_block_row, nearby_block_col], block[0, 0])
                     dc_coefficients_by_block[block_row, block_col] = block[0, 0]
-                block = undo_map_to_unsigned_int(block)
                 block = undo_quantize(block, quantization_matrix)
                 block = undo_dct(block, dct_matrix)
                 block = clip_and_convert_to_dtype(block, np.uint8)
