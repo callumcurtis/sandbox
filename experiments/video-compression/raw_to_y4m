@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+
+if [ $# -ne 2 ]; then
+    echo "Usage: $0 <input_file> <output_file>"
+    exit 1
+fi
+
+input_file="$1"
+output_file="$2"
+
+ffmpeg -f rawvideo -pixel_format yuv420p -framerate 30 -video_size 352x288 -i - -f yuv4mpegpipe $output_file < $input_file

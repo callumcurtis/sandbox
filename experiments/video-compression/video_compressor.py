@@ -51,7 +51,7 @@ def undo_map_to_unsigned_int(block: np.ndarray) -> np.ndarray:
     # All even non-zero numbers are actually positive, so are divided by 2.
     assert block.dtype == np.uint8
     signed_block = np.zeros_like(block, dtype=np.int8)
-    signed_block[block % 2 == 1] = block[block % 2 == 1] // -2
+    signed_block[block % 2 == 1] = block[block % 2 == 1].astype(np.int32) // -2
     signed_block[block % 2 == 0] = block[block % 2 == 0] // 2
     return signed_block
 
@@ -471,7 +471,7 @@ def decompress(
         blocks_wide = (width+block_size-1)//block_size
         blocks_high = (height+block_size-1)//block_size
         dc_coefficients_by_block = np.zeros((blocks_high, blocks_wide), dtype=np.uint8)
-        unflattened_blocks = np.zeros((blocks_high, blocks_wide, block_size, block_size))
+        unflattened_blocks = np.zeros((blocks_high, blocks_wide, block_size, block_size), dtype=np.uint8)
         unflattened_blocks_by_plane.append(unflattened_blocks)
         for block_ind, block in enumerate(read_entropy_encoded_flattened_blocks(
             input_bit_stream,
@@ -487,7 +487,7 @@ def decompress(
             block = undo_zigzag(block)
             if block_ind > 0:
                 nearby_block_row, nearby_block_col = get_nearby_block_pos((block_row, block_col), (blocks_high, blocks_wide))
-                block[0, 0] = undo_delta_between_blocks(dc_coefficients_by_block[nearby_block_row, nearby_block_col], dc_coefficients_by_block[block_row, block_col])
+                block[0, 0] = undo_delta_between_blocks(dc_coefficients_by_block[nearby_block_row, nearby_block_col], block[0, 0])
                 dc_coefficients_by_block[block_row, block_col] = block[0, 0]
             block = undo_map_to_unsigned_int(block)
             block = undo_quantize(block, quantization_matrix)

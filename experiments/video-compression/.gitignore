@@ -8,5 +8,5 @@
 scratch/
 
 # artifacts
-compressed
-compressed.gz
+compressed*
+decompressed*
