@@ -8,4 +8,4 @@ fi
 input_file="$1"
 output_file="$2"
 
-ffmpeg -f rawvideo -pixel_format yuv420p -framerate 30 -video_size 352x288 -i - -f yuv4mpegpipe $output_file < $input_file
+ffmpeg -f rawvideo -pixel_format yuv420p -framerate 30 -y -video_size 352x288 -i - -f yuv4mpegpipe $output_file < $input_file
