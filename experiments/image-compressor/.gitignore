@@ -1,12 +1,16 @@
 # direnv
 .direnv
 
-# images
-*.yuv
+# vscode
+.vscode
 
 # scratches
 scratch/
 
 # artifacts
-compressed
-compressed.gz
+compressed*
+decompressed*
+
+# derived data
+data/derived
+

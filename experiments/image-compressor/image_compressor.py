@@ -494,7 +494,7 @@ for i, (plane, quantization_matrix) in enumerate([
 ]):
     transmitted_dc_coeffs = np.zeros((plane.shape[0]*plane.shape[1])//(block_size**2), dtype=np.int32)
     for j, block in enumerate(do_flatten_blocks(do_blockify(plane, block_size))):
-        do_print = i == 0 and j == 0
+        do_print = False
         if do_print:
             print(f"(Compression) original block:\n{block}")
         block = do_dct(block, dct_matrix)
@@ -556,7 +556,7 @@ for i, (w, h, quantization_matrix) in enumerate([
     transmitted_dc_coeffs = np.zeros(num_blocks, dtype=np.int32)
     unflattened_blocks = make_unflattened_block_container(w, h, block_size)
     for j, block in enumerate(read_entropy_encoded_blocks(byte_reader, num_blocks)):
-        do_print = i == 0 and j == 0
+        do_print = i == 0
         if do_print:
             print(f"(Decompression) transmitted block:\n{block}")
         if config.intra_block_delta_dct_coeff_enabled:
