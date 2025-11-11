@@ -595,14 +595,14 @@ def make_meta(height: int, width: int) -> Meta:
         (PrefixCode(prefix_code=0b11110, num_bits=5), Offset(start=63, num_bits=1)),
     ]
     prefix_codes_and_offsets_for_values = [
-        (PrefixCode(prefix_code=0b1100, num_bits=4), Offset(start=0, num_bits=0)),
+        (PrefixCode(prefix_code=0b1110, num_bits=4), Offset(start=0, num_bits=0)),
         (PrefixCode(prefix_code=0b0, num_bits=1), Offset(start=1, num_bits=1)),
         (PrefixCode(prefix_code=0b10, num_bits=2), Offset(start=3, num_bits=2)),
-        (PrefixCode(prefix_code=0b1101, num_bits=4), Offset(start=7, num_bits=3)),
+        (PrefixCode(prefix_code=0b110, num_bits=3), Offset(start=7, num_bits=3)),
         (PrefixCode(prefix_code=0b11110, num_bits=5), Offset(start=15, num_bits=4)),
         (PrefixCode(prefix_code=0b111110, num_bits=6), Offset(start=31, num_bits=5)),
-        (PrefixCode(prefix_code=0b111111, num_bits=6), Offset(start=63, num_bits=6)),
-        (PrefixCode(prefix_code=0b1110, num_bits=4), Offset(start=127, num_bits=7)),
+        (PrefixCode(prefix_code=0b1111110, num_bits=7), Offset(start=63, num_bits=6)),
+        (PrefixCode(prefix_code=0b1111111, num_bits=7), Offset(start=127, num_bits=7)),
     ]
 
     return Meta(
