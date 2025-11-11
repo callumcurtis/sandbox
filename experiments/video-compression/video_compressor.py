@@ -639,6 +639,8 @@ class Meta(pydantic.BaseModel):
     sync_frame_marker_escape_byte: int
     sync_frame_special_character_xor_byte: int
     model_config = pydantic.ConfigDict(arbitrary_types_allowed=True)
+    sync_frame_interval: int
+    quality: Quality
 
 def make_meta(height: int, width: int) -> Meta:
     block_size = 8
@@ -697,6 +699,8 @@ def make_meta(height: int, width: int) -> Meta:
         sync_frame_marker_byte=0xFF,
         sync_frame_marker_escape_byte=0xFE,
         sync_frame_special_character_xor_byte=0x80,
+        sync_frame_interval=30, # TODO: tune
+        quality=Quality.LOW, # TODO: actually use the quality level
     )
 
 if __name__ == "__main__":
@@ -726,8 +730,8 @@ if __name__ == "__main__":
                 meta.sync_frame_marker_escape_byte,
                 meta.sync_frame_special_character_xor_byte,
             ),
-            sync_frame_interval=30, # TODO: tune
-            quality=Quality.LOW, # TODO: actually use the quality level
+            sync_frame_interval=meta.sync_frame_interval,
+            quality=meta.quality,
         )
     else:
         decompress(
@@ -749,6 +753,6 @@ if __name__ == "__main__":
             value_offset_by_prefix_code=meta.value_offset_by_prefix_code,
             length_of_run_of_zeros_offset_by_prefix_code=meta.length_of_run_of_zeros_offset_by_prefix_code,
             output_buffer=sys.stdout.buffer,
-            sync_frame_interval=30, # TODO: tune
-            quality=Quality.LOW, # TODO: actually use the quality level
+            sync_frame_interval=meta.sync_frame_interval,
+            quality=meta.quality,
         )
