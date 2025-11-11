@@ -402,10 +402,16 @@ def read_frame_planes_from_file(
         return None
     return planes
 
+class Quality(enum.Enum):
+    LOW = 0
+    MEDIUM = 1
+    HIGH = 2
+
 def compress_blockified_frame_plane(
     blockified_frame_plane: np.ndarray, # (blocks_tall, blocks_wide, block_size, block_size)
     dct_matrix: np.ndarray,
     quantization_matrix: np.ndarray,
+    quality: Quality,
     maximum_value_offset: Offset,
 ) -> np.ndarray: # (blocks_tall, blocks_wide, block_size, block_size)
     compressed_blocks = np.zeros((
@@ -418,7 +424,7 @@ def compress_blockified_frame_plane(
         for block_col in range(blockified_frame_plane.shape[1]):
             block = blockified_frame_plane[block_row, block_col]
             block = do_dct(block, dct_matrix)
-            block = do_quantize(block, quantization_matrix)
+            block = do_quantize(block, adjust_quantization_matrix_for_quality(quantization_matrix, quality))
             block = clip_and_convert_to_dtype(block, np.int8)
             if not (block_row == 0 and block_col == 0):
                 dc_coefficient_by_block[block_row, block_col] = block[0, 0]
@@ -435,6 +441,7 @@ def compress_blockified_frame_planes(
     dct_matrix: np.ndarray,
     luminance_quantization_matrix: np.ndarray,
     chrominance_quantization_matrix: np.ndarray,
+    quality: Quality,
     maximum_value_offset: Offset,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     return (
@@ -442,18 +449,21 @@ def compress_blockified_frame_planes(
             blockified_frame_planes[0],
             dct_matrix,
             luminance_quantization_matrix,
+            quality,
             maximum_value_offset,
         ),
         compress_blockified_frame_plane(
             blockified_frame_planes[1],
             dct_matrix,
             chrominance_quantization_matrix,
+            quality,
             maximum_value_offset,
         ),
         compress_blockified_frame_plane(
             blockified_frame_planes[2],
             dct_matrix,
             chrominance_quantization_matrix,
+            quality,
             maximum_value_offset,
         ),
     )
@@ -472,11 +482,6 @@ def blockify_frame_planes(
     block_size: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     return tuple(blockify_frame_plane(frame_plane, block_size) for frame_plane in frame_planes)
-
-class Quality(enum.Enum):
-    LOW = 0
-    MEDIUM = 1
-    HIGH = 2
 
 def compress(
     input_buffer: BinaryIO,
@@ -506,8 +511,6 @@ def compress(
             print(f"No more frames to compress; number of frames compressed: {frame_ind}", file=sys.stderr)
             break
         blockified_frame_planes = blockify_frame_planes(frame_planes, block_size)
-        # TODO: encode resolution
-        # TODO: encode quality level
         # TODO: B-frames (0.015 bits per pixel) and P-frames (0.1 bits per pixel)
         # TODO: motion vectors
         # TODO: sync frames
@@ -517,6 +520,7 @@ def compress(
             dct_matrix,
             luminance_quantization_matrix,
             chrominance_quantization_matrix,
+            quality,
             prefix_code_and_offset_by_value[-1][1],
         )
         if frame_ind % sync_frame_interval == 0:
@@ -539,6 +543,13 @@ def compress(
         frame_ind += 1
     output_bit_stream.flush()
 
+def adjust_quantization_matrix_for_quality(quantization_matrix: np.ndarray, quality: Quality) -> np.ndarray:
+    return quantization_matrix * {
+        Quality.LOW: 4,
+        Quality.MEDIUM: 2,
+        Quality.HIGH: 1,
+    }[quality]
+
 def decompress(
     input_bit_stream: InputBitStream,
     block_size: int,
@@ -558,11 +569,15 @@ def decompress(
     while not is_last_frame:
         print(f"Decompressing frame {frame_ind}", file=sys.stderr)
         if frame_ind % sync_frame_interval == 0:
-            input_bit_stream.discard_up_to_and_including_sync_frame_marker()
-            if not input_bit_stream.exhausted:
+            try:
+                input_bit_stream.discard_up_to_and_including_sync_frame_marker()
                 width = input_bit_stream.read_bits(16)
                 height = input_bit_stream.read_bits(16)
                 quality = Quality(input_bit_stream.read_bits(2))
+            except ValueError:
+                print(f"No more frames to decompress; number of frames decompressed: {frame_ind}", file=sys.stderr)
+                is_last_frame = True
+                break
         unflattened_blocks_by_plane = []
         # TODO: only print after decompressing all planes
         for (plane_width, plane_height, quantization_matrix) in [
@@ -599,7 +614,7 @@ def decompress(
                     nearby_block_row, nearby_block_col = get_nearby_block_pos((block_row, block_col), (blocks_high, blocks_wide))
                     block[0, 0] = undo_delta_between_blocks(dc_coefficients_by_block[nearby_block_row, nearby_block_col], block[0, 0])
                     dc_coefficients_by_block[block_row, block_col] = block[0, 0]
-                block = undo_quantize(block, quantization_matrix)
+                block = undo_quantize(block, adjust_quantization_matrix_for_quality(quantization_matrix, quality))
                 block = undo_dct(block, dct_matrix)
                 block = clip_and_convert_to_dtype(block, np.uint8)
                 unflattened_blocks[block_row, block_col] = block
@@ -697,7 +712,7 @@ def make_meta(height: int, width: int) -> Meta:
         sync_frame_marker_escape_byte=0xFE,
         sync_frame_special_character_xor_byte=0x80,
         sync_frame_interval=30, # TODO: tune
-        quality=Quality.LOW, # TODO: actually use the quality level
+        quality=Quality.HIGH,
     )
 
 if __name__ == "__main__":
