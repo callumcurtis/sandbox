@@ -178,7 +178,8 @@ class InputBitStream:
         self.exhausted = False
 
     def read_bits(self, num_bits: int) -> int:
-        assert not self.exhausted
+        if self.exhausted:
+            raise ValueError("InputBitStream is exhausted")
         out = 0
         for i in range(num_bits):
             out |= ((self.byte >> (7 - self.bit_index)) & 1) << (num_bits - i - 1)
@@ -321,8 +322,11 @@ def read_frame_plane_from_file(
     input_buffer: BinaryIO,
     height: int,
     width: int,
-) -> np.ndarray:
-    b = input_buffer.read(height * width)
+) -> np.ndarray | None:
+    length = height * width
+    b = input_buffer.read(length)
+    if len(b) < length:
+        return None
     return np.frombuffer(b, dtype=np.uint8).reshape((height, width))
 
 def read_frame_planes_from_file(
@@ -330,12 +334,14 @@ def read_frame_planes_from_file(
     height: int,
     width: int,
     chrominance_subsampling_factor: int,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    return (
-        read_frame_plane_from_file(input_buffer, height, width),
-        read_frame_plane_from_file(input_buffer, height // chrominance_subsampling_factor, width // chrominance_subsampling_factor),
-        read_frame_plane_from_file(input_buffer, height // chrominance_subsampling_factor, width // chrominance_subsampling_factor),
-    )
+) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+    Y = read_frame_plane_from_file(input_buffer, height, width)
+    Cb = read_frame_plane_from_file(input_buffer, height // chrominance_subsampling_factor, width // chrominance_subsampling_factor)
+    Cr = read_frame_plane_from_file(input_buffer, height // chrominance_subsampling_factor, width // chrominance_subsampling_factor)
+    planes = (Y, Cb, Cr)
+    if any(plane is None for plane in planes):
+        return None
+    return planes
 
 def compress_blockified_frame_plane(
     blockified_frame_plane: np.ndarray, # (blocks_tall, blocks_wide, block_size, block_size)
@@ -421,30 +427,37 @@ def compress(
     prefix_code_and_offset_by_length_of_run_of_zeros: list[tuple[PrefixCode, Offset]],
     output_bit_stream: OutputBitStream,
 ) -> None:
-    frame_planes = read_frame_planes_from_file(
-        input_buffer,
-        height,
-        width,
-        chrominance_subsampling_factor,
-    )
-    blockified_frame_planes = blockify_frame_planes(frame_planes, block_size)
-    compressed_blockified_frame_planes = compress_blockified_frame_planes(
-        blockified_frame_planes,
-        dct_matrix,
-        luminance_quantization_matrix,
-        chrominance_quantization_matrix,
-        prefix_code_and_offset_by_value[-1][1],
-    )
-    write_blockified_frame_planes(
-        compressed_blockified_frame_planes,
-        lambda block: write_entropy_encoded_flattened_block(
-            block,
-            block_size,
-            prefix_code_and_offset_by_value,
-            prefix_code_and_offset_by_length_of_run_of_zeros,
-            output_bit_stream,
+    frame_ind = 0
+    while True:
+        print(f"Compressing frame {frame_ind}", file=sys.stderr)
+        frame_planes = read_frame_planes_from_file(
+            input_buffer,
+            height,
+            width,
+            chrominance_subsampling_factor,
         )
-    )
+        if frame_planes is None:
+            print(f"No more frames to compress; number of frames compressed: {frame_ind}", file=sys.stderr)
+            break
+        blockified_frame_planes = blockify_frame_planes(frame_planes, block_size)
+        compressed_blockified_frame_planes = compress_blockified_frame_planes(
+            blockified_frame_planes,
+            dct_matrix,
+            luminance_quantization_matrix,
+            chrominance_quantization_matrix,
+            prefix_code_and_offset_by_value[-1][1],
+        )
+        write_blockified_frame_planes(
+            compressed_blockified_frame_planes,
+            lambda block: write_entropy_encoded_flattened_block(
+                block,
+                block_size,
+                prefix_code_and_offset_by_value,
+                prefix_code_and_offset_by_length_of_run_of_zeros,
+                output_bit_stream,
+            )
+        )
+        frame_ind += 1
 
 def decompress(
     input_bit_stream: InputBitStream,
@@ -461,52 +474,63 @@ def decompress(
     length_of_run_of_zeros_offset_by_prefix_code: dict[PrefixCode, Offset],
     output_buffer: BinaryIO,
 ) -> None:
-    unflattened_blocks_by_plane = []
-    for (width, height, quantization_matrix) in [
-        (width, height, luminance_quantization_matrix),
-        (width // chrominance_subsampling_factor, height // chrominance_subsampling_factor, chrominance_quantization_matrix),
-        (width // chrominance_subsampling_factor, height // chrominance_subsampling_factor, chrominance_quantization_matrix),
-    ]:
-        num_blocks = width * height // (block_size ** 2)
-        blocks_wide = (width+block_size-1)//block_size
-        blocks_high = (height+block_size-1)//block_size
-        dc_coefficients_by_block = np.zeros((blocks_high, blocks_wide), dtype=np.uint8)
-        unflattened_blocks = np.zeros((blocks_high, blocks_wide, block_size, block_size), dtype=np.uint8)
-        unflattened_blocks_by_plane.append(unflattened_blocks)
-        for block_ind, block in enumerate(read_entropy_encoded_flattened_blocks(
-            input_bit_stream,
-            num_blocks,
-            block_size,
-            prefix_tree_root_for_values,
-            prefix_tree_root_for_lengths_of_runs_of_zeros,
-            value_offset_by_prefix_code,
-            length_of_run_of_zeros_offset_by_prefix_code,
-        )):
-            block_row = block_ind // blocks_wide
-            block_col = block_ind % blocks_wide
-            block = undo_zigzag(block)
-            if block_ind > 0:
-                nearby_block_row, nearby_block_col = get_nearby_block_pos((block_row, block_col), (blocks_high, blocks_wide))
-                block[0, 0] = undo_delta_between_blocks(dc_coefficients_by_block[nearby_block_row, nearby_block_col], block[0, 0])
-                dc_coefficients_by_block[block_row, block_col] = block[0, 0]
-            block = undo_map_to_unsigned_int(block)
-            block = undo_quantize(block, quantization_matrix)
-            block = undo_dct(block, dct_matrix)
-            block = clip_and_convert_to_dtype(block, np.uint8)
-            unflattened_blocks[block_row, block_col] = block
-        row = 0
-        for block_row in range(blocks_high):
-            for row_within_block in range(block_size):
-                col = 0
-                for block_col in range(blocks_wide):
-                    for col_within_block in range(block_size):
-                        output_buffer.write(unflattened_blocks[block_row, block_col, row_within_block, col_within_block])
-                        col += 1
-                        if col >= width:
-                            break
-                row += 1
-                if row >= height:
-                    break
+    frame_ind = 0
+    is_last_frame = False
+    while not is_last_frame:
+        print(f"Decompressing frame {frame_ind}", file=sys.stderr)
+        unflattened_blocks_by_plane = []
+        for (plane_width, plane_height, quantization_matrix) in [
+            (width, height, luminance_quantization_matrix),
+            (width // chrominance_subsampling_factor, height // chrominance_subsampling_factor, chrominance_quantization_matrix),
+            (width // chrominance_subsampling_factor, height // chrominance_subsampling_factor, chrominance_quantization_matrix),
+        ]:
+            num_blocks = plane_width * plane_height // (block_size ** 2)
+            blocks_wide = (plane_width+block_size-1)//block_size
+            blocks_high = (plane_height+block_size-1)//block_size
+            dc_coefficients_by_block = np.zeros((blocks_high, blocks_wide), dtype=np.uint8)
+            unflattened_blocks = np.zeros((blocks_high, blocks_wide, block_size, block_size), dtype=np.uint8)
+            unflattened_blocks_by_plane.append(unflattened_blocks)
+            try:
+                blocks = list(read_entropy_encoded_flattened_blocks(
+                    input_bit_stream,
+                    num_blocks,
+                    block_size,
+                    prefix_tree_root_for_values,
+                    prefix_tree_root_for_lengths_of_runs_of_zeros,
+                    value_offset_by_prefix_code,
+                    length_of_run_of_zeros_offset_by_prefix_code,
+                ))
+            except ValueError:
+                print(f"No more frames to decompress; number of frames decompressed: {frame_ind}", file=sys.stderr)
+                is_last_frame = True
+                break
+            for block_ind, block in enumerate(blocks):
+                block_row = block_ind // blocks_wide
+                block_col = block_ind % blocks_wide
+                block = undo_zigzag(block)
+                if block_ind > 0:
+                    nearby_block_row, nearby_block_col = get_nearby_block_pos((block_row, block_col), (blocks_high, blocks_wide))
+                    block[0, 0] = undo_delta_between_blocks(dc_coefficients_by_block[nearby_block_row, nearby_block_col], block[0, 0])
+                    dc_coefficients_by_block[block_row, block_col] = block[0, 0]
+                block = undo_map_to_unsigned_int(block)
+                block = undo_quantize(block, quantization_matrix)
+                block = undo_dct(block, dct_matrix)
+                block = clip_and_convert_to_dtype(block, np.uint8)
+                unflattened_blocks[block_row, block_col] = block
+            row = 0
+            for block_row in range(blocks_high):
+                for row_within_block in range(block_size):
+                    col = 0
+                    for block_col in range(blocks_wide):
+                        for col_within_block in range(block_size):
+                            output_buffer.write(unflattened_blocks[block_row, block_col, row_within_block, col_within_block])
+                            col += 1
+                            if col >= plane_width:
+                                break
+                    row += 1
+                    if row >= plane_height:
+                        break
+        frame_ind += 1
 
 class Meta(pydantic.BaseModel):
     height: int
@@ -584,10 +608,10 @@ def make_meta(height: int, width: int) -> Meta:
 if __name__ == "__main__":
     meta = make_meta(288, 352)
     if len(sys.argv) != 2:
-        print("Usage: python video_compressor.py <compress|decompress>")
+        print("Usage: python video_compressor.py <compress|decompress>", file=sys.stderr)
         sys.exit(1)
     if sys.argv[1] not in ["compress", "decompress"]:
-        print("Usage: python video_compressor.py <compress|decompress>")
+        print("Usage: python video_compressor.py <compress|decompress>", file=sys.stderr)
         sys.exit(1)
     is_compressing = sys.argv[1] == "compress"
     if is_compressing:
