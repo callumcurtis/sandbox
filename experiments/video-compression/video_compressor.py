@@ -386,7 +386,7 @@ def read_frame_plane_from_file(
     b = input_buffer.read(length)
     if len(b) < length:
         return None
-    return np.frombuffer(b, dtype=np.uint8).reshape((height, width))
+    return np.frombuffer(b, dtype=np.uint8).reshape((height, width)).astype(np.int16)
 
 def read_frame_planes_from_file(
     input_buffer: BinaryIO,
@@ -408,6 +408,7 @@ class Quality(enum.Enum):
     HIGH = 2
 
 def compress_blockified_frame_plane(
+    motion_vectors: list[tuple[int, int] | None],
     blockified_frame_plane: np.ndarray, # (blocks_tall, blocks_wide, block_size, block_size)
     dct_matrix: np.ndarray,
     quantization_matrix: np.ndarray,
@@ -426,10 +427,14 @@ def compress_blockified_frame_plane(
             block = do_dct(block, dct_matrix)
             block = do_quantize(block, adjust_quantization_matrix_for_quality(quantization_matrix, quality))
             block = clip_and_convert_to_dtype(block, np.int8)
-            if not (block_row == 0 and block_col == 0):
+            block_ind = block_row * blockified_frame_plane.shape[1] + block_col
+            if not motion_vectors or motion_vectors[block_ind] is None:
                 dc_coefficient_by_block[block_row, block_col] = block[0, 0]
-                nearby_block_row, nearby_block_col = get_nearby_block_pos((block_row, block_col), blockified_frame_plane.shape[:-2])
-                block[0, 0] = do_delta_between_blocks(dc_coefficient_by_block[nearby_block_row, nearby_block_col], dc_coefficient_by_block[block_row, block_col])
+                if block_row > 0 or block_col > 0:
+                    nearby_block_row, nearby_block_col = get_nearby_block_pos((block_row, block_col), blockified_frame_plane.shape[:-2])
+                    nearby_block_ind = nearby_block_row * blockified_frame_plane.shape[1] + nearby_block_col
+                    if not motion_vectors or motion_vectors[nearby_block_ind] is None:
+                        block[0, 0] = do_delta_between_blocks(dc_coefficient_by_block[nearby_block_row, nearby_block_col], block[0, 0])
             block = do_map_to_unsigned_int(block)
             block = do_clip_to_range_of_values(block, maximum_value_offset)
             block = do_zigzag(block)
@@ -437,6 +442,7 @@ def compress_blockified_frame_plane(
     return compressed_blocks
 
 def compress_blockified_frame_planes(
+    motion_vectors_by_plane: list[list[tuple[int, int] | None]],
     blockified_frame_planes: tuple[np.ndarray, np.ndarray, np.ndarray],
     dct_matrix: np.ndarray,
     luminance_quantization_matrix: np.ndarray,
@@ -446,6 +452,7 @@ def compress_blockified_frame_planes(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     return (
         compress_blockified_frame_plane(
+            motion_vectors_by_plane[0],
             blockified_frame_planes[0],
             dct_matrix,
             luminance_quantization_matrix,
@@ -453,6 +460,7 @@ def compress_blockified_frame_planes(
             maximum_value_offset,
         ),
         compress_blockified_frame_plane(
+            motion_vectors_by_plane[1],
             blockified_frame_planes[1],
             dct_matrix,
             chrominance_quantization_matrix,
@@ -460,6 +468,7 @@ def compress_blockified_frame_planes(
             maximum_value_offset,
         ),
         compress_blockified_frame_plane(
+            motion_vectors_by_plane[2],
             blockified_frame_planes[2],
             dct_matrix,
             chrominance_quantization_matrix,
@@ -470,9 +479,19 @@ def compress_blockified_frame_planes(
 
 def write_blockified_frame_planes(
     blockified_frame_planes: tuple[np.ndarray, np.ndarray, np.ndarray],
+    motion_vectors_by_plane: list[list[tuple[int, int] | None]],
     block_writer: Callable[[np.ndarray], None],
+    output_bit_stream: OutputBitStream,
 ) -> None:
-    for blockified_frame_plane in blockified_frame_planes:
+    for plane_ind, blockified_frame_plane in enumerate(blockified_frame_planes):
+        motion_vectors = motion_vectors_by_plane[plane_ind]
+        for motion_vector in motion_vectors:
+            if motion_vector is None:
+                output_bit_stream.write_integral(0, 1)
+            else:
+                output_bit_stream.write_integral(1, 1)
+                output_bit_stream.write_integral(int(do_map_to_unsigned_int(np.array([motion_vector[0]], dtype=np.int8))[0]), 3)
+                output_bit_stream.write_integral(int(do_map_to_unsigned_int(np.array([motion_vector[1]], dtype=np.int8))[0]), 3)
         for block_row in range(blockified_frame_plane.shape[0]):
             for block_col in range(blockified_frame_plane.shape[1]):
                 block_writer(blockified_frame_plane[block_row, block_col])
@@ -482,6 +501,11 @@ def blockify_frame_planes(
     block_size: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     return tuple(blockify_frame_plane(frame_plane, block_size) for frame_plane in frame_planes)
+
+def compression_cost(
+    block: np.ndarray,
+) -> float:
+    return np.var(block)
 
 def compress(
     input_buffer: BinaryIO,
@@ -499,6 +523,11 @@ def compress(
     quality: Quality,
 ) -> None:
     frame_ind = 0
+    decompressed_previous_frame = [
+        np.zeros((height, width), dtype=np.uint8),
+        np.zeros((height // chrominance_subsampling_factor, width // chrominance_subsampling_factor), dtype=np.uint8),
+        np.zeros((height // chrominance_subsampling_factor, width // chrominance_subsampling_factor), dtype=np.uint8),
+    ]
     while True:
         print(f"Compressing frame {frame_ind}", file=sys.stderr)
         frame_planes = read_frame_planes_from_file(
@@ -513,16 +542,42 @@ def compress(
         blockified_frame_planes = blockify_frame_planes(frame_planes, block_size)
         # TODO: B-frames (0.015 bits per pixel) and P-frames (0.1 bits per pixel)
         # TODO: motion vectors
-        # TODO: sync frames
         # TODO: dynamic huffman codes for each saga
-        compressed_blockified_frame_planes = compress_blockified_frame_planes(
-            blockified_frame_planes,
-            dct_matrix,
-            luminance_quantization_matrix,
-            chrominance_quantization_matrix,
-            quality,
-            prefix_code_and_offset_by_value[-1][1],
-        )
+        motion_vectors_by_plane: list[list[tuple[int, int] | None]] = [[], [], []]
+        if not frame_ind % sync_frame_interval == 0:
+            for plane_ind, (plane, quantization_matrix) in enumerate(zip(
+                blockified_frame_planes,
+                [luminance_quantization_matrix, chrominance_quantization_matrix, chrominance_quantization_matrix],
+            )):
+                for block_row in range(plane.shape[0]):
+                    for block_col in range(plane.shape[1]):
+                        block = plane[block_row, block_col].copy()
+                        compression_cost_of_block = compression_cost(block)
+                        # Local motion vector search
+                        motion_vector = None
+                        block_origin_row = block_row * block_size
+                        block_origin_col = block_col * block_size
+                        search_negative = -4
+                        search_positive = 3
+                        for origin_row_in_previous_frame in range(max(0, block_origin_row + search_negative), min(decompressed_previous_frame[plane_ind].shape[0], block_origin_row + search_positive + 1)):
+                            for origin_col_in_previous_frame in range(max(0, block_origin_col + search_negative), min(decompressed_previous_frame[plane_ind].shape[1], block_origin_col + search_positive + 1)):
+                                block_in_previous_frame = decompressed_previous_frame[plane_ind][
+                                    origin_row_in_previous_frame:min(decompressed_previous_frame[plane_ind].shape[0], origin_row_in_previous_frame + block_size),
+                                    origin_col_in_previous_frame:min(decompressed_previous_frame[plane_ind].shape[1], origin_col_in_previous_frame + block_size)
+                                ]
+                                if block_in_previous_frame.shape[1] < block_size:
+                                    block_in_previous_frame = np.pad(block_in_previous_frame, ((0, 0), (0, block_size - block_in_previous_frame.shape[1])), mode='mean')
+                                if block_in_previous_frame.shape[0] < block_size:
+                                    block_in_previous_frame = np.pad(block_in_previous_frame, ((0, block_size - block_in_previous_frame.shape[0]), (0, 0)), mode='mean')
+                                delta_with_block_in_previous_frame = block - block_in_previous_frame
+                                compression_cost_of_delta_with_block_in_previous_frame = compression_cost(delta_with_block_in_previous_frame)
+                                if compression_cost_of_delta_with_block_in_previous_frame < compression_cost_of_block:
+                                    compression_cost_of_block = compression_cost_of_delta_with_block_in_previous_frame
+                                    motion_vector = (origin_row_in_previous_frame - block_origin_row, origin_col_in_previous_frame - block_origin_col)
+                                    assert motion_vector[0] >= search_negative and motion_vector[0] <= search_positive
+                                    assert motion_vector[1] >= search_negative and motion_vector[1] <= search_positive
+                                    plane[block_row, block_col] = delta_with_block_in_previous_frame
+                        motion_vectors_by_plane[plane_ind].append(motion_vector)
         if frame_ind % sync_frame_interval == 0:
             # The sync frame marker must be byte-aligned.
             output_bit_stream.flush()
@@ -530,16 +585,69 @@ def compress(
             output_bit_stream.write_integral(width, 16)
             output_bit_stream.write_integral(height, 16)
             output_bit_stream.write_integral(quality.value, 2)
+        compressed_blockified_frame_planes = compress_blockified_frame_planes(
+            motion_vectors_by_plane,
+            blockified_frame_planes,
+            dct_matrix,
+            luminance_quantization_matrix,
+            chrominance_quantization_matrix,
+            quality,
+            prefix_code_and_offset_by_value[-1][1],
+        )
         write_blockified_frame_planes(
             compressed_blockified_frame_planes,
+            motion_vectors_by_plane,
             lambda block: write_entropy_encoded_flattened_block(
                 block,
                 block_size,
                 prefix_code_and_offset_by_value,
                 prefix_code_and_offset_by_length_of_run_of_zeros,
                 output_bit_stream,
-            )
+            ),
+            output_bit_stream,
         )
+        decompressed_current_frame = [
+            np.zeros_like(plane) for plane in decompressed_previous_frame
+        ]
+        for plane_ind, (plane, quantization_matrix) in enumerate(zip(
+            compressed_blockified_frame_planes,
+            [luminance_quantization_matrix, chrominance_quantization_matrix, chrominance_quantization_matrix],
+        )):
+            dc_coefficients_by_block = np.zeros((plane.shape[0], plane.shape[1]), dtype=np.int8)
+            for block_row in range(plane.shape[0]):
+                for block_col in range(plane.shape[1]):
+                    block = plane[block_row, block_col]
+                    block = undo_zigzag(block)
+                    block = undo_map_to_unsigned_int(block)
+                    block_ind = block_row * plane.shape[1] + block_col
+                    if not motion_vectors_by_plane[plane_ind] or motion_vectors_by_plane[plane_ind][block_ind] is None:
+                        if block_row > 0 or block_col > 0:
+                            nearby_block_row, nearby_block_col = get_nearby_block_pos((block_row, block_col), (plane.shape[0], plane.shape[1]))
+                            nearby_block_ind = nearby_block_row * plane.shape[1] + nearby_block_col
+                            if not motion_vectors_by_plane[plane_ind] or motion_vectors_by_plane[plane_ind][nearby_block_ind] is None:
+                                block[0, 0] = undo_delta_between_blocks(dc_coefficients_by_block[nearby_block_row, nearby_block_col], block[0, 0]) # 2
+                        dc_coefficients_by_block[block_row, block_col] = block[0, 0]
+                    block = undo_quantize(block, adjust_quantization_matrix_for_quality(quantization_matrix, quality))
+                    block = undo_dct(block, dct_matrix)
+                    if motion_vectors_by_plane[plane_ind] and motion_vectors_by_plane[plane_ind][block_ind] is not None:
+                        row = block_row * block_size
+                        col = block_col * block_size
+                        origin_row_in_previous_frame = row + motion_vectors_by_plane[plane_ind][block_ind][0]
+                        origin_col_in_previous_frame = col + motion_vectors_by_plane[plane_ind][block_ind][1]
+                        assert origin_row_in_previous_frame >= 0 and origin_row_in_previous_frame < decompressed_previous_frame[plane_ind].shape[0]
+                        assert origin_col_in_previous_frame >= 0 and origin_col_in_previous_frame < decompressed_previous_frame[plane_ind].shape[1]
+                        block_in_previous_frame = decompressed_previous_frame[plane_ind][
+                            origin_row_in_previous_frame:min(decompressed_previous_frame[plane_ind].shape[0], origin_row_in_previous_frame + block_size),
+                            origin_col_in_previous_frame:min(decompressed_previous_frame[plane_ind].shape[1], origin_col_in_previous_frame + block_size),
+                        ]
+                        if block_in_previous_frame.shape[1] < block_size:
+                            block_in_previous_frame = np.pad(block_in_previous_frame, ((0, 0), (0, block_size - block_in_previous_frame.shape[1])), mode='mean')
+                        if block_in_previous_frame.shape[0] < block_size:
+                            block_in_previous_frame = np.pad(block_in_previous_frame, ((0, block_size - block_in_previous_frame.shape[0]), (0, 0)), mode='mean')
+                        block = block_in_previous_frame + block
+                    block = clip_and_convert_to_dtype(block, np.uint8)
+                    decompressed_current_frame[plane_ind][block_row*block_size:(block_row*block_size)+block_size, block_col*block_size:(block_col*block_size)+block_size] = block
+        decompressed_previous_frame = decompressed_current_frame
         frame_ind += 1
     output_bit_stream.flush()
 
@@ -566,6 +674,7 @@ def decompress(
 ) -> None:
     frame_ind = 0
     is_last_frame = False
+    previous_frame = None
     while not is_last_frame:
         print(f"Decompressing frame {frame_ind}", file=sys.stderr)
         if frame_ind % sync_frame_interval == 0:
@@ -574,17 +683,24 @@ def decompress(
                 width = input_bit_stream.read_bits(16)
                 height = input_bit_stream.read_bits(16)
                 quality = Quality(input_bit_stream.read_bits(2))
+                if previous_frame is None:
+                    previous_frame = [
+                        np.zeros((height, width), dtype=np.uint8),
+                        np.zeros((height // chrominance_subsampling_factor, width // chrominance_subsampling_factor), dtype=np.uint8),
+                        np.zeros((height // chrominance_subsampling_factor, width // chrominance_subsampling_factor), dtype=np.uint8),     
+                    ]
             except ValueError:
                 print(f"No more frames to decompress; number of frames decompressed: {frame_ind}", file=sys.stderr)
                 is_last_frame = True
                 break
         unflattened_blocks_by_plane = []
+        current_frame = [np.zeros_like(plane) for plane in previous_frame]
         # TODO: only print after decompressing all planes
-        for (plane_width, plane_height, quantization_matrix) in [
+        for plane_ind, (plane_width, plane_height, quantization_matrix) in enumerate([
             (width, height, luminance_quantization_matrix),
             (width // chrominance_subsampling_factor, height // chrominance_subsampling_factor, chrominance_quantization_matrix),
             (width // chrominance_subsampling_factor, height // chrominance_subsampling_factor, chrominance_quantization_matrix),
-        ]:
+        ]):
             num_blocks = plane_width * plane_height // (block_size ** 2)
             blocks_wide = (plane_width+block_size-1)//block_size
             blocks_high = (plane_height+block_size-1)//block_size
@@ -592,6 +708,17 @@ def decompress(
             unflattened_blocks = np.zeros((blocks_high, blocks_wide, block_size, block_size), dtype=np.uint8)
             unflattened_blocks_by_plane.append(unflattened_blocks)
             try:
+                motion_vectors = []
+                if not frame_ind % sync_frame_interval == 0:
+                    for _ in range(num_blocks):
+                        is_motion_vector = input_bit_stream.read_bits(1)
+                        if is_motion_vector:
+                            motion_vectors.append((
+                                int(undo_map_to_unsigned_int(np.array([input_bit_stream.read_bits(3)], dtype=np.uint8))[0]),
+                                int(undo_map_to_unsigned_int(np.array([input_bit_stream.read_bits(3)], dtype=np.uint8))[0]),
+                            ))
+                        else:
+                            motion_vectors.append(None)
                 blocks = list(read_entropy_encoded_flattened_blocks(
                     input_bit_stream,
                     num_blocks,
@@ -610,14 +737,35 @@ def decompress(
                 block_col = block_ind % blocks_wide
                 block = undo_zigzag(block)
                 block = undo_map_to_unsigned_int(block)
-                if block_ind > 0:
-                    nearby_block_row, nearby_block_col = get_nearby_block_pos((block_row, block_col), (blocks_high, blocks_wide))
-                    block[0, 0] = undo_delta_between_blocks(dc_coefficients_by_block[nearby_block_row, nearby_block_col], block[0, 0])
+                if not motion_vectors or motion_vectors[block_ind] is None:
+                    if block_row > 0 or block_col > 0:
+                        nearby_block_row, nearby_block_col = get_nearby_block_pos((block_row, block_col), (blocks_high, blocks_wide))
+                        nearby_block_ind = nearby_block_row * blocks_wide + nearby_block_col
+                        if not motion_vectors or motion_vectors[nearby_block_ind] is None:
+                            block[0, 0] = undo_delta_between_blocks(dc_coefficients_by_block[nearby_block_row, nearby_block_col], block[0, 0])
                     dc_coefficients_by_block[block_row, block_col] = block[0, 0]
                 block = undo_quantize(block, adjust_quantization_matrix_for_quality(quantization_matrix, quality))
                 block = undo_dct(block, dct_matrix)
+                if motion_vectors and motion_vectors[block_ind] is not None:
+                    row = block_row * block_size
+                    col = block_col * block_size
+                    origin_row_in_previous_frame = row + motion_vectors[block_ind][0]
+                    origin_col_in_previous_frame = col + motion_vectors[block_ind][1]
+                    assert origin_row_in_previous_frame >= 0 and origin_row_in_previous_frame < previous_frame[plane_ind].shape[0]
+                    assert origin_col_in_previous_frame >= 0 and origin_col_in_previous_frame < previous_frame[plane_ind].shape[1]
+                    block_in_previous_frame = previous_frame[plane_ind][
+                        origin_row_in_previous_frame:min(previous_frame[plane_ind].shape[0], origin_row_in_previous_frame + block_size),
+                        origin_col_in_previous_frame:min(previous_frame[plane_ind].shape[1], origin_col_in_previous_frame + block_size),
+                    ]
+                    if block_in_previous_frame.shape[1] < block_size:
+                        block_in_previous_frame = np.pad(block_in_previous_frame, ((0, 0), (0, block_size - block_in_previous_frame.shape[1])), mode='mean')
+                    if block_in_previous_frame.shape[0] < block_size:
+                        block_in_previous_frame = np.pad(block_in_previous_frame, ((0, block_size - block_in_previous_frame.shape[0]), (0, 0)), mode='mean')
+                    block = block_in_previous_frame + block
                 block = clip_and_convert_to_dtype(block, np.uint8)
                 unflattened_blocks[block_row, block_col] = block
+                current_frame[plane_ind][block_row*block_size:(block_row*block_size)+block_size, block_col*block_size:(block_col*block_size)+block_size] = block
+            # TODO: print using the current frame rather than unflattened_blocks
             row = 0
             for block_row in range(blocks_high):
                 for row_within_block in range(block_size):
@@ -631,6 +779,7 @@ def decompress(
                     row += 1
                     if row >= plane_height:
                         break
+        previous_frame = current_frame
         frame_ind += 1
 
 class Meta(pydantic.BaseModel):
