@@ -562,8 +562,8 @@ def compress(
                         for origin_row_in_previous_frame in range(max(0, block_origin_row + search_negative), min(decompressed_previous_frame[plane_ind].shape[0], block_origin_row + search_positive + 1)):
                             for origin_col_in_previous_frame in range(max(0, block_origin_col + search_negative), min(decompressed_previous_frame[plane_ind].shape[1], block_origin_col + search_positive + 1)):
                                 block_in_previous_frame = decompressed_previous_frame[plane_ind][
-                                    origin_row_in_previous_frame:min(decompressed_previous_frame[plane_ind].shape[0], origin_row_in_previous_frame + block_size),
-                                    origin_col_in_previous_frame:min(decompressed_previous_frame[plane_ind].shape[1], origin_col_in_previous_frame + block_size)
+                                    origin_row_in_previous_frame:max(0, min(decompressed_previous_frame[plane_ind].shape[0], origin_row_in_previous_frame + block_size)),
+                                    origin_col_in_previous_frame:max(0, min(decompressed_previous_frame[plane_ind].shape[1], origin_col_in_previous_frame + block_size))
                                 ]
                                 if block_in_previous_frame.shape[1] < block_size:
                                     block_in_previous_frame = np.pad(block_in_previous_frame, ((0, 0), (0, block_size - block_in_previous_frame.shape[1])), mode='mean')
