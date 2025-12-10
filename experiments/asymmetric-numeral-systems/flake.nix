@@ -16,6 +16,7 @@
           packages = with pkgs; [
             python312
             gcc
+            xxd
           ];
         };
       });
