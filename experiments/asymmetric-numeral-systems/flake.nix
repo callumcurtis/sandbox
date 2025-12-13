@@ -17,6 +17,7 @@
             python312
             gcc
             xxd
+            gdb
           ];
         };
       });
